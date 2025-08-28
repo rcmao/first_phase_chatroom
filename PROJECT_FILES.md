@@ -24,7 +24,7 @@ interruptive_chatbot/
 ### 主要文件
 
 #### `tki_gender_aware_bot.py` - 核心机器人实现
-- **功能**: 基于TKI模型的性别意识智能干预机器人
+- **功能**: Chime（基于TKI模型的性别意识智能干预机器人）
 - **主要类**: `TKIGenderAwareBot`
 - **作用**: 整合检测器和干预生成器，处理消息并决定是否需要干预
 - **关键方法**: 

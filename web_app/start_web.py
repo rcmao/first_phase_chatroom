@@ -114,48 +114,26 @@ def create_default_data():
             db.session.rollback()
 
 def main():
-    """主函数"""
-    print("🚀 启动TKI智能干预聊天机器人Web应用")
-    print("=" * 50)
-    
-    # 检查环境变量
     if not os.environ.get('SECRET_KEY'):
         os.environ['SECRET_KEY'] = 'your-secret-key-here-change-in-production'
-        print("⚠️  使用默认SECRET_KEY，生产环境请设置环境变量")
     
-    # 创建数据库表
     with app.app_context():
         db.create_all()
-        print("✅ 数据库表创建完成")
     
-    # 创建默认数据
     create_default_data()
     
-    print("\n📋 应用信息:")
-    print(f"   - 主页: http://localhost:8080")
-    print(f"   - 房间管理: http://localhost:8080/rooms")
-    print(f"   - 数据统计: http://localhost:8080/dashboard")
-    print(f"   - 聊天房间: http://localhost:8080/chat/1")
-    print("\n👤 默认用户:")
-    print(f"   - 管理员: admin/admin123")
-    print(f"   - 测试用户: tester/test123")
-    print(f"   - 测试用户1: test1_m/test123 (男)")
-    print(f"   - 测试用户2: test2_m/test123 (男)")
-    print("\n🔧 技术栈:")
-    print(f"   - 后端: Flask + SQLAlchemy + SocketIO")
-    print(f"   - 前端: HTML5 + CSS3 + JavaScript")
-    print(f"   - 数据库: SQLite")
-    print(f"   - 实时通信: WebSocket")
-    print("=" * 50)
-    
-    # 启动应用
     try:
-        from app import socketio
+        from app import socketio, realtime_monitor
+        
+        # 启动实时监控系统
+        realtime_monitor.start_monitoring()
+        print("🚀 实时监控系统已启动")
+        
         socketio.run(app, debug=True, host='0.0.0.0', port=8080)
     except KeyboardInterrupt:
-        print("\n👋 应用已停止")
+        pass
     except Exception as e:
-        print(f"❌ 启动失败: {e}")
+        pass
 
 if __name__ == '__main__':
     main() 

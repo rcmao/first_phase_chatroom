@@ -3,8 +3,25 @@ import sys
 import json
 import random
 import aiohttp
+import time
 from datetime import datetime, timedelta
 from collections import deque
+
+# 加载环境变量
+try:
+    from dotenv import load_dotenv
+    # 查找.env文件
+    env_files = ['.env', 'env.example']
+    for env_file in env_files:
+        env_path = os.path.join(os.path.dirname(__file__), env_file)
+        if os.path.exists(env_path):
+            load_dotenv(env_path)
+            print(f"✅ 加载环境变量文件: {env_file}")
+            break
+    else:
+        print("⚠️ 未找到.env文件，使用系统环境变量")
+except ImportError:
+    print("⚠️ python-dotenv未安装，使用系统环境变量")
 
 # 添加项目根目录到Python路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -38,6 +55,7 @@ try:
     from src.detectors.gpt4_realtime_context_analyzer import GPT4RealtimeContextAnalyzer
     from core.tki_gender_aware_bot import TKIGenderAwareBot
     from translations import get_text, get_language_list
+    from smart_intervention_engine import SmartInterventionEngine, InterventionType, OffenseLevel
 except ImportError as e:
     logger.error(f"导入项目模块失败: {e}")
     # 创建空的占位符类
@@ -79,11 +97,153 @@ except ImportError as e:
     
     class TKIGenderAwareBot:
         pass
+    
+    # 添加get_text和get_language_list的占位符函数
+    def get_text(lang='zh'):
+        """占位符翻译函数"""
+        return {
+            'page_title': '聊天房间',
+            'welcome': '欢迎',
+            'send': '发送'
+        }
+    
+    def get_language_list():
+        """占位符语言列表函数"""
+        return ['zh', 'en']
+    
+    class SmartInterventionEngine:
+        def __init__(self):
+            # 简化的占位符实现，检测基本冒犯词汇
+            self.user_last_message_time = {}
+            self.user_mute_until = {}  # 添加禁言管理
+            self.user_message_count = {}
+            self.room_recent_messages = {}
+            self.offense_keywords = {
+                'mild': ['烂梗', '外号', '标签'],
+                'moderate': ['拉踩', '讨厌', '恶心'],
+                'severe': ['闭嘴', '废物', '垃圾']
+            }
+        
+        def analyze_message(self, room_id, user_id, username, message_content, gender='unknown'):
+            """简化的冒犯检测"""
+            message_lower = message_content.lower()
+            
+            # 检查严重冒犯
+            for word in self.offense_keywords['severe']:
+                if word in message_lower:
+                    return type('InterventionResult', (), {
+                        'should_intervene': True,
+                        'intervention_type': type('InterventionType', (), {'value': 'conflict_interruption'}),
+                        'message': '请保持基本的尊重，避免人身攻击。',
+                        'reason': f'检测到严重冒犯词汇: {word}',
+                        'offense_level': type('OffenseLevel', (), {'value': 'severe'}),
+                        'target_user': None
+                    })()
+            
+            # 检查中度冒犯
+            for word in self.offense_keywords['moderate']:
+                if word in message_lower:
+                    return type('InterventionResult', (), {
+                        'should_intervene': True,
+                        'intervention_type': type('InterventionType', (), {'value': 'conflict_interruption'}),
+                        'message': '该说法可能冒犯他人，请尝试换一种表达。',
+                        'reason': f'检测到中度冒犯词汇: {word}',
+                        'offense_level': type('OffenseLevel', (), {'value': 'moderate'}),
+                        'target_user': None
+                    })()
+            
+            # 检查轻度冒犯
+            for word in self.offense_keywords['mild']:
+                if word in message_lower:
+                    return type('InterventionResult', (), {
+                        'should_intervene': True,
+                        'intervention_type': type('InterventionType', (), {'value': 'conflict_interruption'}),
+                        'message': '提示：请尽量用客观表达，避免使用梗或标签化词汇。',
+                        'reason': f'检测到轻度不当词汇: {word}',
+                        'offense_level': type('OffenseLevel', (), {'value': 'mild'}),
+                        'target_user': None
+                    })()
+            
+            return None
+        
+        def is_user_muted(self, room_id: str, user_id: str):
+            """检查用户是否被禁言"""
+            import time
+            key = f"{room_id}_{user_id}"
+            until_ts = self.user_mute_until.get(key, 0)
+            now = time.time()
+            if until_ts > now:
+                return True, int(until_ts - now)
+            return False, 0
+        
+        def record_mute(self, room_id: str, user_id: str, seconds: int):
+            """设置禁言到期时间"""
+            import time
+            key = f"{room_id}_{user_id}"
+            self.user_mute_until[key] = time.time() + max(1, seconds)
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///chatbot.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['INTERVENTION_ENABLED'] = True  # ← 默认开启
+
+# 手动房间管理系统 - 用于解决Flask-SocketIO房间加入问题
+manual_room_mapping = {}  # {client_id: room_id}
+room_clients = {}  # {room_id: [client_id1, client_id2, ...]}
+
+def add_client_to_room(client_id, room_id):
+    """手动将客户端添加到房间"""
+    room_id = str(room_id)
+    
+    # 从旧房间移除
+    if client_id in manual_room_mapping:
+        old_room = manual_room_mapping[client_id]
+        if old_room in room_clients and client_id in room_clients[old_room]:
+            room_clients[old_room].remove(client_id)
+            if not room_clients[old_room]:  # 如果房间空了，删除房间
+                del room_clients[old_room]
+    
+    # 添加到新房间
+    manual_room_mapping[client_id] = room_id
+    if room_id not in room_clients:
+        room_clients[room_id] = []
+    if client_id not in room_clients[room_id]:
+        room_clients[room_id].append(client_id)
+    
+    print(f"✅ 手动房间管理：客户端 {client_id} 已加入房间 {room_id}")
+    print(f"   房间 {room_id} 现有客户端: {room_clients.get(room_id, [])}")
+
+def remove_client_from_rooms(client_id):
+    """手动从所有房间移除客户端"""
+    if client_id in manual_room_mapping:
+        room_id = manual_room_mapping[client_id]
+        if room_id in room_clients and client_id in room_clients[room_id]:
+            room_clients[room_id].remove(client_id)
+            if not room_clients[room_id]:
+                del room_clients[room_id]
+        del manual_room_mapping[client_id]
+        print(f"✅ 手动房间管理：客户端 {client_id} 已从房间 {room_id} 移除")
+
+def get_room_clients(room_id):
+    """获取房间中的所有客户端"""
+    room_id = str(room_id)
+    return room_clients.get(room_id, [])
+
+def manual_emit_to_room(event, data, room_id):
+    """手动发送消息到房间中的所有客户端"""
+    room_id = str(room_id)
+    clients = get_room_clients(room_id)
+    if clients:
+        print(f"📡 手动广播到房间 {room_id}，客户端数: {len(clients)}")
+        for client_id in clients:
+            try:
+                socketio.emit(event, data, to=client_id)
+                print(f"   ✅ 发送到客户端 {client_id}")
+            except Exception as e:
+                print(f"   ❌ 发送到客户端 {client_id} 失败: {e}")
+    else:
+        print(f"⚠️  房间 {room_id} 没有客户端")
 
 db = SQLAlchemy(app)
 login_manager = LoginManager()
@@ -164,6 +324,7 @@ class Room(db.Model):
     created_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=get_local_time)
     updated_at = db.Column(db.DateTime, default=get_local_time, onupdate=get_local_time)
+    chatbot_enabled = db.Column(db.Boolean, default=False)  # 按房间控制Chatbot
     
     # 关系
     members = db.relationship('RoomMembership', backref='room', lazy=True)
@@ -213,7 +374,6 @@ class Message(db.Model):
     conversation_id = db.Column(db.Integer, db.ForeignKey('conversation.id'))
     room_id = db.Column(db.Integer, db.ForeignKey('room.id'))
     
-    # 干预相关
     has_interruption = db.Column(db.Boolean, default=False)
     interruption_type = db.Column(db.String(50))
     intervention_applied = db.Column(db.Boolean, default=False)
@@ -226,7 +386,12 @@ class Intervention(db.Model):
     strategy = db.Column(db.String(50), nullable=False)  # TKI策略类型
     intervention_text = db.Column(db.Text, nullable=False)
     trigger_type = db.Column(db.String(50))  # 触发类型
+    trigger_reason = db.Column(db.Text)  # 触发原因（管理员可见）
+    intervention_type = db.Column(db.String(50))
+    offense_level = db.Column(db.String(20))  # 冒犯等级
+    target_user = db.Column(db.String(100))  # 目标用户
     effectiveness = db.Column(db.Integer)  # 效果评分 1-5
+    is_visible_to_admin_only = db.Column(db.Boolean, default=False)  # 是否仅管理员可见原因
     created_at = db.Column(db.DateTime, default=get_local_time)
 
 class Statistics(db.Model):
@@ -285,23 +450,46 @@ def jwt_required(f):
     return decorated_function
 
 def admin_required(f):
-    """管理员权限装饰器"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated or not current_user.is_admin():
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+            try:
+                payload = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+                user_id = payload['user_id']
+                user = User.query.get(user_id)
+                if user and user.is_admin():
+                    return f(*args, **kwargs)
+                else:
+                    return jsonify({'error': '需要管理员权限'}), 403
+            except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+                return jsonify({'error': '无效的Token'}), 401
+        elif current_user.is_authenticated and current_user.is_admin():
+            return f(*args, **kwargs)
+        else:
             return jsonify({'error': '需要管理员权限'}), 403
-        return f(*args, **kwargs)
     return decorated_function
 
 # 创建数据库表
 with app.app_context():
     db.create_all()
 
-# TKI机器人实例
+# 机器人实例（Chime）
 tki_bot = TKIGenderAwareBot()
 
 # 初始化GPT-4实时上下文分析器
 gpt4_context_analyzer = GPT4RealtimeContextAnalyzer()
+
+# 初始化智能干预引擎 - 强制重新导入以获取最新版本
+import importlib
+import smart_intervention_engine as sie_module
+importlib.reload(sie_module)
+smart_intervention_engine = sie_module.SmartInterventionEngine()
+
+# 初始化实时监控系统
+from realtime_monitor import RealtimeMonitor
+realtime_monitor = RealtimeMonitor(smart_intervention_engine, socketio, app)
 
 # 路由定义
 @app.route('/')
@@ -670,6 +858,31 @@ def send_message(room_id):
     if not data or not data.get('content'):
         return jsonify({'error': '消息内容不能为空'}), 400
     
+    # 检查用户是否有权限发送消息到此房间
+    # 管理员可以向任何房间发送消息
+    if not current_user.is_admin():
+        # 非管理员用户需要检查房间成员资格
+        membership = RoomMembership.query.filter_by(
+            user_id=current_user.id, room_id=room_id
+        ).first()
+        if not membership:
+            return jsonify({'error': '您不是该房间的成员'}), 403
+    else:
+        # 管理员如果不是房间成员，自动加入
+        membership = RoomMembership.query.filter_by(
+            user_id=current_user.id, room_id=room_id
+        ).first()
+        if not membership:
+            admin_membership = RoomMembership(
+                user_id=current_user.id,
+                room_id=room_id,
+                role='admin',
+                is_online=True
+            )
+            db.session.add(admin_membership)
+            db.session.commit()
+            print(f'管理员 {current_user.id} 自动加入房间 {room_id}')
+    
     # 创建消息
     message = Message(
         content=data['content'],
@@ -681,20 +894,62 @@ def send_message(room_id):
     
     db.session.add(message)
     db.session.commit()
-    
-    # 使用TKI机器人分析消息
+
+    # === 新增：如果关闭了干预，直接广播并返回 ===
+    if not app.config.get('INTERVENTION_ENABLED', False):
+        message_data = {
+            'id': message.id,
+            'content': message.content,
+            'author': message.author,
+            'avatar': current_user.avatar,
+            'timestamp': message.timestamp.isoformat(),
+            'has_interruption': False,
+            'interruption_type': None,
+            'intervention_applied': False
+        }
+        socketio.emit('message', message_data, room=str(room_id))
+        return jsonify(message_data), 201
+    # =========================================
+
+    intervention_message = None
+    intervention_reason = None
     try:
-        # 暂时跳过TKI分析，专注于消息发送功能
-        # analysis_result = await tki_bot.process_message(
-        #     message_data['content'], 
-        #     user.username, 
-        #     user.gender
-        # )
-        pass
+        intervention_result = smart_intervention_engine.analyze_message(
+            room_id=str(room_id),
+            user_id=str(current_user.id),
+            username=current_user.display_name or current_user.username,
+            message_content=message.content,
+            gender=current_user.gender
+        )
         
+        
+        if intervention_result and intervention_result.should_intervene:
+            message.has_interruption = True
+            message.interruption_type = intervention_result.intervention_type.value
+            message.intervention_applied = True
+            
+            # 保存干预消息和原因
+            intervention_message = intervention_result.message
+            intervention_reason = intervention_result.reason
+            
+            # 创建干预记录
+            intervention_record = Intervention(
+                room_id=room_id,
+                message_id=message.id,
+                strategy=intervention_result.intervention_type.value,
+                intervention_text=intervention_result.message,
+                trigger_type=intervention_result.intervention_type.value,
+                trigger_reason=intervention_result.reason,
+                intervention_type=intervention_result.intervention_type.value,
+                offense_level=intervention_result.offense_level.value if intervention_result.offense_level else None,
+                target_user=intervention_result.target_user,
+                is_visible_to_admin_only=True
+            )
+            
+            db.session.add(intervention_record)
+            
     except Exception as e:
-        print(f"TKI分析错误: {e}")
-        # 如果TKI分析失败，继续处理消息
+        # 如果智能干预失败，继续处理消息
         pass
     
     db.session.commit()
@@ -715,14 +970,24 @@ def send_message(room_id):
     socketio.emit('message', message_data, room=str(room_id))
     
     # 如果有干预，发送干预消息
-    if message.intervention_applied:
+    if message.intervention_applied and intervention_message:
         intervention_data = {
             'type': 'intervention',
+            'message': intervention_message,
             'strategy': message.interruption_type,
-            'text': message.intervention_text, # Use message.intervention_text
             'timestamp': get_local_time().isoformat()
         }
+        
+        intervention_data_admin = intervention_data.copy()
+        intervention_data_admin['reason'] = intervention_reason
+        intervention_data_admin['is_admin_info'] = True
+        
         socketio.emit('intervention', intervention_data, room=str(room_id))
+        
+        # 单独给管理员发送包含原因的干预消息
+        # socketio.emit('intervention_admin', intervention_data_admin, room=str(room_id))
+        socketio.emit('intervention_admin', intervention_data_admin, room='admin_room')
+
     
     return jsonify(message_data), 201
 
@@ -870,7 +1135,7 @@ def get_dashboard_activity():
     for intervention in recent_interventions:
         activities.append({
             'type': 'intervention',
-            'text': f'TKI机器人应用了 {intervention.strategy} 策略',
+            'text': f'Chime 应用了 {intervention.strategy} 策略',
             'timestamp': intervention.created_at.isoformat()
         })
     
@@ -998,10 +1263,164 @@ def update_user_profile():
         print(f"更新用户资料失败: {e}")
         return jsonify({'error': '更新失败'}), 500
 
+
 @app.route('/profile')
 def profile():
     """用户资料页面"""
     return render_template('profile.html')
+
+def _emit_intervention_to_room(intervention_result, room_id):
+    """发送干预消息到指定房间"""
+    try:
+        if not intervention_result or not intervention_result.should_intervene:
+            return
+            
+        intervention_data = {
+            'type': 'intervention',
+            'message': intervention_result.message,
+            'strategy': intervention_result.intervention_type.value if hasattr(intervention_result.intervention_type, 'value') else str(intervention_result.intervention_type),
+            'timestamp': get_local_time().isoformat()
+        }
+        
+        # 发送给房间所有用户
+        socketio.emit('intervention', intervention_data, room=str(room_id))
+        
+        # 如果有调试信息，发送给管理员
+        if hasattr(intervention_result, 'reason') and intervention_result.reason:
+            admin_data = dict(intervention_data)
+            admin_data['reason'] = intervention_result.reason
+            admin_data['is_admin_info'] = True
+            socketio.emit('intervention_admin', admin_data, room='admin_room')
+            
+        print(f"✅ [干预发送] 房间{room_id}干预消息已发送: {intervention_result.message[:50]}...")
+        
+    except Exception as e:
+        print(f"❌ [干预发送] 房间{room_id}发送失败: {e}")
+
+def _trigger_icebreaker_for_room(room_id):
+    """为指定房间触发破冰检查"""
+    try:
+        room_id = str(room_id)
+        print(f"🎯 [破冰触发] 开始检查房间{room_id}...")
+        
+        if room_id not in realtime_monitor.active_rooms:
+            print(f"📊 [破冰触发] 房间{room_id}不在活跃状态")
+            return
+        
+        current_time = time.time()
+        
+        # 检查房间是否需要破冰
+        recent_messages = list(smart_intervention_engine.room_recent_messages.get(room_id, []))
+        non_admin_messages = [msg for msg in recent_messages if not smart_intervention_engine._is_admin_user(str(msg['user_id']))]
+        
+        # 实验场景：更积极的破冰策略
+        should_trigger = False
+        if not non_admin_messages:
+            if recent_messages:
+                # 有admin消息但用户未响应，立即触发破冰
+                last_admin_msg_time = recent_messages[-1]['timestamp']
+                admin_silence = current_time - last_admin_msg_time
+                if admin_silence >= 15:  # 15秒后就触发破冰，更积极
+                    should_trigger = True
+                    reason = f"admin消息后用户沉默{int(admin_silence)}秒，触发破冰"
+            else:
+                # 完全没有消息，立即触发破冰
+                should_trigger = True
+                reason = "房间无消息历史，触发破冰"
+        else:
+            last_user_msg_time = non_admin_messages[-1]['timestamp']
+            silence_duration = current_time - last_user_msg_time
+            if silence_duration >= 30:  # 降低到30秒，更积极触发
+                should_trigger = True
+                reason = f"用户沉默{int(silence_duration)}秒"
+        
+        if should_trigger:
+            print(f"🎯 [破冰触发] 房间{room_id}需要破冰: {reason}")
+            result = smart_intervention_engine._check_agenda_transition(room_id)
+            if result and result.should_intervene:
+                _emit_intervention_to_room(result, room_id)
+                print(f"✅ [破冰触发] 房间{room_id}破冰消息已发送")
+            else:
+                print(f"❌ [破冰触发] 房间{room_id}未生成破冰消息")
+        else:
+            print(f"📊 [破冰触发] 房间{room_id}暂不需要破冰")
+                
+    except Exception as e:
+        print(f"❌ [破冰触发] 房间{room_id}处理失败: {e}")
+
+def _trigger_icebreaker_for_all_rooms():
+    """当Chatbot开关启用时，为所有活跃房间触发破冰检查"""
+    try:
+        print("🎯 [破冰触发] 开始检查所有活跃房间...")
+        
+        # 获取所有活跃房间
+        active_rooms = list(realtime_monitor.active_rooms)
+        if not active_rooms:
+            print("📊 [破冰触发] 当前无活跃房间")
+            return
+        
+        print(f"📊 [破冰触发] 发现{len(active_rooms)}个活跃房间: {active_rooms}")
+        
+        current_time = time.time()
+        triggered_rooms = []
+        
+        for room_id in active_rooms:
+            try:
+                room_id = str(room_id)
+                
+                # 检查房间是否需要破冰
+                recent_messages = list(smart_intervention_engine.room_recent_messages.get(room_id, []))
+                non_admin_messages = [msg for msg in recent_messages if not smart_intervention_engine._is_admin_user(str(msg['user_id']))]
+                
+                # 如果没有用户消息，或者用户沉默时间较长，触发破冰
+                needs_icebreaker = False
+                if len(non_admin_messages) == 0 and len(recent_messages) > 0:
+                    # 有admin消息但没有用户响应
+                    needs_icebreaker = True
+                    reason = "admin消息后用户未响应"
+                elif len(recent_messages) == 0:
+                    # 完全没有消息
+                    needs_icebreaker = True
+                    reason = "房间无消息历史"
+                elif len(non_admin_messages) > 0:
+                    # 检查用户沉默时间
+                    last_user_msg_time = non_admin_messages[-1]['timestamp']
+                    silence_duration = current_time - last_user_msg_time
+                    if silence_duration >= 30:  # 30秒以上就触发破冰，更积极
+                        needs_icebreaker = True
+                        reason = f"用户沉默{int(silence_duration)}秒"
+                
+                if needs_icebreaker:
+                    print(f"🚀 [破冰触发] 房间{room_id}: {reason}，立即触发破冰")
+                    
+                    # 重置冷却时间，确保可以立即执行
+                    smart_intervention_engine.room_last_agenda_transition[room_id] = 0
+                    smart_intervention_engine.room_last_intervention_ts[room_id] = 0
+                    
+                    # 检查并执行破冰
+                    agenda_result = smart_intervention_engine._check_agenda_transition(room_id)
+                    if agenda_result and agenda_result.should_intervene:
+                        # 手动触发干预执行
+                        realtime_monitor._execute_intervention(room_id, agenda_result)
+                        triggered_rooms.append(room_id)
+                        print(f"✅ [破冰触发] 房间{room_id}破冰成功: {agenda_result.message[:40]}...")
+                    else:
+                        print(f"⚠️ [破冰触发] 房间{room_id}破冰检查未通过")
+                else:
+                    print(f"✅ [破冰触发] 房间{room_id}无需破冰")
+                    
+            except Exception as e:
+                print(f"❌ [破冰触发] 房间{room_id}处理失败: {e}")
+        
+        if triggered_rooms:
+            print(f"🎉 [破冰触发] 总计为{len(triggered_rooms)}个房间触发了破冰: {triggered_rooms}")
+        else:
+            print("📝 [破冰触发] 所有房间均无需破冰")
+            
+    except Exception as e:
+        print(f"❌ [破冰触发] 全局处理失败: {e}")
+        import traceback
+        print(f"详细错误: {traceback.format_exc()}")
 
 @app.route('/admin')
 @admin_required
@@ -1009,18 +1428,27 @@ def admin_dashboard():
     """管理员控制面板"""
     return render_template('admin_dashboard.html')
 
-@app.route('/test-admin-style')
-def test_admin_style():
-    """测试admin风格切换功能"""
-    return render_template('test_admin_style.html')
 
-# WebSocket事件处理
+# @socketio.on('connect')
+# def handle_connect():
+#     print(f'客户端连接: {request.sid}')
+    
+#     # 尝试从查询参数获取JWT token
+#     token = request.args.get('token')
+#     if token:
+#         try:
+#             payload = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+#             user_id = payload['user_id']
+#             session['user_id'] = user_id
+#             print(f'WebSocket连接用户ID: {user_id}')
+#         except jwt.ExpiredSignatureError:
+#             print('JWT token已过期')
+#         except jwt.InvalidTokenError:
+#             print('无效的JWT token')
+
 @socketio.on('connect')
 def handle_connect():
-    """处理WebSocket连接"""
     print(f'客户端连接: {request.sid}')
-    
-    # 尝试从查询参数获取JWT token
     token = request.args.get('token')
     if token:
         try:
@@ -1028,15 +1456,28 @@ def handle_connect():
             user_id = payload['user_id']
             session['user_id'] = user_id
             print(f'WebSocket连接用户ID: {user_id}')
+
+            # === 新增：管理员加入 admin_room ===
+            user = User.query.get(user_id)
+            if user and user.is_admin():
+                session['is_admin'] = True
+                join_room('admin_room')
+                print(f'管理员 {user.username} 已加入 admin_room')
+            else:
+                session['is_admin'] = False
+
         except jwt.ExpiredSignatureError:
             print('JWT token已过期')
         except jwt.InvalidTokenError:
             print('无效的JWT token')
 
+
+
 @socketio.on('disconnect')
 def handle_disconnect():
-    """处理WebSocket断开"""
     print(f'客户端断开: {request.sid}')
+    # 从手动房间管理系统中移除客户端
+    remove_client_from_rooms(request.sid)
 
 @socketio.on('echo')
 def handle_echo(data):
@@ -1053,7 +1494,6 @@ def handle_test(data):
 
 @socketio.on('join_room')
 def handle_join_room(data):
-    """处理加入房间事件"""
     print(f'=== 收到加入房间事件 ===')
     print(f'事件数据: {data}')
     print(f'当前session: {session}')
@@ -1064,13 +1504,27 @@ def handle_join_room(data):
         print(f'用户请求加入房间: {room}')
         # 确保房间是字符串类型
         room = str(room)
-        join_room(room)
-        print(f'用户已加入房间: {room}')
         
-        # 验证房间加入是否成功
+        # 先离开所有之前的房间（除了默认房间）
         from flask_socketio import rooms
-        client_rooms = rooms(request.sid)
-        print(f'客户端 {request.sid} 当前所在房间: {client_rooms}')
+        current_rooms = rooms(request.sid)
+        for old_room in current_rooms:
+            if old_room != request.sid:  # 不离开默认房间
+                leave_room(old_room)
+                print(f'用户离开旧房间: {old_room}')
+        
+        # 使用手动房间管理系统
+        add_client_to_room(request.sid, room)
+        
+        # 也尝试使用Flask-SocketIO的原生方法（作为备用）
+        try:
+            join_room(room)
+            print(f'Flask-SocketIO: 用户已加入房间 {room}')
+        except Exception as e:
+            print(f'Flask-SocketIO加入房间失败: {e}')
+        
+        # 房间加入成功，不再发送系统消息给用户
+        print(f'✅ 用户已成功加入房间 {room}，手动房间管理系统工作正常')
         
         # 更新用户状态
         user_id = session.get('user_id')
@@ -1082,10 +1536,24 @@ def handle_join_room(data):
                 membership = RoomMembership.query.filter_by(
                     user_id=user_id, room_id=int(room)
                 ).first()
+                
+                user = User.query.get(user_id)
+                
                 if membership:
                     membership.is_online = True
                     db.session.commit()
                     print(f'用户 {user_id} 在房间 {room} 中状态已更新为在线')
+                elif user and user.is_admin():
+                    # 管理员即使不是房间成员也允许加入，自动创建成员关系
+                    admin_membership = RoomMembership(
+                        user_id=user_id, 
+                        room_id=int(room), 
+                        role='admin',
+                        is_online=True
+                    )
+                    db.session.add(admin_membership)
+                    db.session.commit()
+                    print(f'管理员 {user_id} 自动加入房间 {room} 并设置为在线')
                 else:
                     print(f'警告: 用户 {user_id} 不是房间 {room} 的成员')
             except Exception as e:
@@ -1099,13 +1567,15 @@ def handle_join_room(data):
             'timestamp': datetime.now().isoformat()
         }, room=room)
         
+        # 将房间添加到实时监控
+        realtime_monitor.add_active_room(room)
+        
         print(f'=== 加入房间事件处理完成 ===')
     else:
         print(f'错误: 房间ID为空')
 
 @socketio.on('leave_room')
 def handle_leave_room(data):
-    """处理离开房间事件"""
     print(f'收到离开房间事件: {data}')
     room = data.get('room')
     if room:
@@ -1136,7 +1606,6 @@ def handle_leave_room(data):
 
 @socketio.on('tki_style_change')
 def handle_tki_style_change(data):
-    """处理TKI风格选择事件"""
     print(f'收到TKI风格选择: {data}')
     room = data.get('room')
     style = data.get('style')
@@ -1210,13 +1679,176 @@ def get_tki_style_description(style):
     }
     return descriptions.get(style, '未知风格')
 
+# @socketio.on('send_message')
+# def handle_send_message(data):
+#     print(f'=== 开始处理send_message事件 ===')
+#     print(f'收到WebSocket消息: {data}')
+#     print(f'数据类型: {type(data)}')
+#     print(f'数据内容: {json.dumps(data, default=str) if data else "None"}')
+    
+#     room = data.get('room')
+#     message_data = data.get('message')
+    
+#     print(f'房间: {room}, 消息数据: {message_data}')
+    
+#     if not room or not message_data:
+#         print('房间或消息数据为空，退出处理')
+#         return
+    
+#     print(f'=== 数据验证通过，继续处理 ===')
+    
+#     # 获取用户信息
+#     user_id = session.get('user_id')
+#     print(f'从session获取的用户ID: {user_id}')
+    
+#     if not user_id and current_user.is_authenticated:
+#         user_id = current_user.id
+#         print(f'从current_user获取的用户ID: {user_id}')
+    
+#     print(f'最终用户ID: {user_id}')
+    
+#     # 如果没有用户ID（测试页面），使用默认用户
+#     if not user_id:
+#         print('无法获取用户ID，使用默认用户')
+#         user = User.query.first()  # 获取第一个用户作为默认用户
+#         if not user:
+#             # 如果没有用户，创建一个默认用户
+#             user = User(
+#                 username='test_user',
+#                 email='test@example.com',
+#                 password_hash='test',
+#                 display_name='测试用户',
+#                 gender='unknown'
+#             )
+#             db.session.add(user)
+#             db.session.commit()
+#             print(f'创建默认用户: {user.username}')
+#         else:
+#             print(f'使用现有用户: {user.username}')
+#     else:
+#         user = User.query.get(user_id)
+#         if not user:
+#             print('用户不存在')
+#             return
+    
+#     print(f'用户信息: {user.username}')
+    
+#     # 创建消息记录
+#     message = Message(
+#         content=message_data['content'],
+#         author=user.display_name or user.username,
+#         gender=user.gender,
+#         room_id=int(room),
+#         user_id=user.id
+#     )
+    
+#     print(f'创建消息: {message.content}')
+    
+#     db.session.add(message)
+#     db.session.commit()
+    
+#     print(f'消息已保存到数据库，ID: {message.id}')
+    
+#     intervention_message = None
+#     intervention_reason = None
+#     try:
+#         intervention_result = smart_intervention_engine.analyze_message(
+#             room_id=room,
+#             user_id=str(user.id),
+#             username=user.display_name or user.username,
+#             message_content=message.content,
+#             gender=user.gender
+#         )
+        
+        
+#         if intervention_result and intervention_result.should_intervene:
+#             message.has_interruption = True
+#             message.interruption_type = intervention_result.intervention_type.value
+#             message.intervention_applied = True
+            
+#             # 保存干预消息和原因
+#             intervention_message = intervention_result.message
+#             intervention_reason = intervention_result.reason
+            
+#             # 创建干预记录
+#             intervention_record = Intervention(
+#                 room_id=int(room),
+#                 message_id=message.id,
+#                 strategy=intervention_result.intervention_type.value,
+#                 intervention_text=intervention_result.message,
+#                 trigger_type=intervention_result.intervention_type.value,
+#                 trigger_reason=intervention_result.reason,
+#                 intervention_type=intervention_result.intervention_type.value,
+#                 offense_level=intervention_result.offense_level.value if intervention_result.offense_level else None,
+#                 target_user=intervention_result.target_user,
+#                 is_visible_to_admin_only=True
+#             )
+            
+#             db.session.add(intervention_record)
+#             db.session.commit()
+            
+            
+#     except Exception as e:
+#         # 如果智能干预失败，继续处理消息
+#         pass
+    
+#     # 构建消息数据
+#     message_info = {
+#         'id': message.id,
+#         'content': message.content,
+#         'author': message.author,
+#         'avatar': user.avatar,  # 添加用户头像
+#         'timestamp': message.timestamp.isoformat(),
+#         'has_interruption': message.has_interruption,
+#         'interruption_type': message.interruption_type,
+#         'intervention_applied': message.intervention_applied,
+#         'client_id': message_data.get('client_id'),
+#         'room': room
+#     }
+    
+#     print(f'准备广播消息: {message_info}')
+#     print(f'广播到房间: {room}')
+    
+#     # 确保room是字符串类型
+#     room = str(room)
+    
+#     # 获取房间内当前连接的客户端数量
+#     from flask_socketio import rooms
+#     room_clients = rooms(room)
+#     print(f'房间 {room} 内当前连接的客户端: {room_clients}')
+#     print(f'当前客户端ID: {request.sid}')
+    
+#     # 使用更可靠的广播方法
+#     try:
+#         # 方法1：使用socketio.emit到房间
+#         socketio.emit('message', message_info, room=room)
+#         print(f'消息已广播到房间 {room}')
+        
+#         # 方法2：如果房间为空，广播给所有连接的客户端（备用方案）
+#         if not room_clients:
+#             print(f'房间 {room} 为空，广播给所有客户端')
+#             socketio.emit('message', message_info)
+#             print(f'消息已广播给所有客户端')
+            
+#     except Exception as e:
+#         print(f'广播消息时出错: {e}')
+#         # 备用方案：广播给所有客户端
+#         socketio.emit('message', message_info)
+#         print(f'使用备用方案广播消息')
+    
+#     print(f'=== send_message事件处理完成 ===')
+
+
+#   2025.08.27 新增 完整替换上方接口：handle_send_message
+
 @socketio.on('send_message')
 def handle_send_message(data):
-    """处理发送消息 - 前端发送的事件名"""
     print(f'=== 开始处理send_message事件 ===')
     print(f'收到WebSocket消息: {data}')
     print(f'数据类型: {type(data)}')
     print(f'数据内容: {json.dumps(data, default=str) if data else "None"}')
+    
+    # 旧版干预广播方法已由后台任务替代
     
     room = data.get('room')
     message_data = data.get('message')
@@ -1244,7 +1876,6 @@ def handle_send_message(data):
         print('无法获取用户ID，使用默认用户')
         user = User.query.first()  # 获取第一个用户作为默认用户
         if not user:
-            # 如果没有用户，创建一个默认用户
             user = User(
                 username='test_user',
                 email='test@example.com',
@@ -1264,6 +1895,66 @@ def handle_send_message(data):
             return
     
     print(f'用户信息: {user.username}')
+
+    # ===2025.8.27  新增：检查用户权限和房间成员资格 ===
+    # 检查用户是否有权限发送消息到此房间
+    # 管理员可以向任何房间发送消息
+    if not user.is_admin():
+        # 非管理员用户需要检查房间成员资格
+        membership = RoomMembership.query.filter_by(
+            user_id=user.id, room_id=int(room)
+        ).first()
+        if not membership:
+            print(f'用户 {user.username} 不是房间 {room} 的成员，拒绝发送消息')
+            notice = {
+                'id': -1,
+                'content': '您不是该房间的成员，无法发送消息。',
+                'author': 'System',
+                'avatar': '',
+                'timestamp': get_local_time().isoformat(),
+                'has_interruption': False,
+                'interruption_type': None,
+                'intervention_applied': False,
+                'room': str(room)
+            }
+            socketio.emit('message', notice, to=request.sid)
+            return
+    else:
+        # 管理员如果不是房间成员，自动加入
+        membership = RoomMembership.query.filter_by(
+            user_id=user.id, room_id=int(room)
+        ).first()
+        if not membership:
+            admin_membership = RoomMembership(
+                user_id=user.id,
+                room_id=int(room),
+                role='admin',
+                is_online=True
+            )
+            db.session.add(admin_membership)
+            db.session.commit()
+            print(f'管理员 {user.username} 自动加入房间 {room}')
+
+    # ===2025.8.27  新增：如果当前已被禁言，直接拦截，不存库、不广播 ===
+    muted, remain = smart_intervention_engine.is_user_muted(str(room), str(user.id))
+    if muted:
+        # 只给本人一个提示，不影响他人（发到当前连接的 socket 会话）
+        notice = {
+            'id': -1,
+            'content': f'你已被禁言，还有 {remain} 秒后解除。',
+            'author': 'Chime',
+            'avatar': '',
+            'timestamp': get_local_time().isoformat(),
+            'has_interruption': False,
+            'interruption_type': None,
+            'intervention_applied': False,
+            'room': str(room)
+        }
+        # socketio.emit('message', notice, room=request.sid)
+        socketio.emit('message', notice, to=request.sid)
+        print(f'[拦截] 用户({user.id}) 在房间({room})处于禁言中，拦截消息。')
+        return
+
     
     # 创建消息记录
     message = Message(
@@ -1278,58 +1969,242 @@ def handle_send_message(data):
     
     db.session.add(message)
     db.session.commit()
-    
+
     print(f'消息已保存到数据库，ID: {message.id}')
     
-    # 构建消息数据
-    message_info = {
+    # === 立即广播用户原消息（不等待智能干预） ===
+    immediate_message_info = {
         'id': message.id,
         'content': message.content,
-        'author': message.author,
-        'avatar': user.avatar,  # 添加用户头像
+        'author': user.display_name or user.username,
+        'avatar': user.avatar or '',
         'timestamp': message.timestamp.isoformat(),
-        'has_interruption': message.has_interruption,
-        'interruption_type': message.interruption_type,
-        'intervention_applied': message.intervention_applied,
-        'client_id': message_data.get('client_id'),
-        'room': room
+        'has_interruption': False,
+        'interruption_type': None,
+        'intervention_applied': False,
+        'client_id': (message_data.get('client_id') if isinstance(message_data, dict) else None),
+        'room': str(room)
     }
-    
-    print(f'准备广播消息: {message_info}')
-    print(f'广播到房间: {room}')
-    
-    # 确保room是字符串类型
-    room = str(room)
-    
-    # 获取房间内当前连接的客户端数量
-    from flask_socketio import rooms
-    room_clients = rooms(room)
-    print(f'房间 {room} 内当前连接的客户端: {room_clients}')
-    print(f'当前客户端ID: {request.sid}')
-    
-    # 使用更可靠的广播方法
-    try:
-        # 方法1：使用socketio.emit到房间
-        socketio.emit('message', message_info, room=room)
-        print(f'消息已广播到房间 {room}')
-        
-        # 方法2：如果房间为空，广播给所有连接的客户端（备用方案）
-        if not room_clients:
-            print(f'房间 {room} 为空，广播给所有客户端')
-            socketio.emit('message', message_info)
-            print(f'消息已广播给所有客户端')
-            
-    except Exception as e:
-        print(f'广播消息时出错: {e}')
-        # 备用方案：广播给所有客户端
-        socketio.emit('message', message_info)
-        print(f'使用备用方案广播消息')
-    
+    manual_emit_to_room('message', immediate_message_info, str(room))
+    print(f"⚡ [即时广播] 用户消息已发送到房间 {room}")
+
+    # === 在后台执行智能干预分析并推送Chatbot消息 ===
+    def _process_intervention_background(room_str: str, user_obj_id: int, user_display_name: str, user_gender: str, message_obj_id: int):
+        try:
+            with app.app_context():
+                room_obj_local = Room.query.get(int(room_str))
+                if not room_obj_local or not room_obj_local.chatbot_enabled:
+                    print(f"🔕 [后台干预] 房间{room_str}未启用Chatbot，跳过干预分析")
+                    return
+
+                # 重新获取message，确保在应用上下文中
+                msg = Message.query.get(message_obj_id)
+                if not msg:
+                    return
+
+                print(f"🧠 [后台干预] 开始分析: 用户{user_obj_id} - '{msg.content[:30]}...'")
+                try:
+                    intervention_result = smart_intervention_engine.analyze_message(
+                        room_id=room_str,
+                        user_id=str(user_obj_id),
+                        username=user_display_name,
+                        message_content=msg.content,
+                        gender=user_gender
+                    )
+                except Exception as e:
+                    print(f"❌ [后台干预] 分析失败: {e}")
+                    return
+
+                if intervention_result and intervention_result.should_intervene:
+                    # 记录干预
+                    intervention_record = Intervention(
+                        room_id=int(room_str),
+                        message_id=msg.id,
+                        strategy=intervention_result.intervention_type.value,
+                        intervention_text=intervention_result.message,
+                        trigger_type=intervention_result.intervention_type.value,
+                        trigger_reason=intervention_result.reason,
+                        intervention_type=intervention_result.intervention_type.value,
+                        offense_level=intervention_result.offense_level.value if intervention_result.offense_level else None,
+                        target_user=intervention_result.target_user,
+                        is_visible_to_admin_only=True
+                    )
+                    db.session.add(intervention_record)
+
+                    # 保存机器人消息
+                    bot_message = Message(
+                        content=intervention_result.message,
+                        author='Chime',
+                        gender='unknown',
+                        room_id=int(room_str),
+                        user_id=None
+                    )
+                    db.session.add(bot_message)
+                    db.session.commit()
+
+                    bot_payload = {
+                        'id': bot_message.id,
+                        'content': bot_message.content,
+                        'author': bot_message.author,
+                        'avatar': '',
+                        'timestamp': bot_message.timestamp.isoformat(),
+                        'has_interruption': False,
+                        'interruption_type': None,
+                        'intervention_applied': False,
+                        'room': room_str,
+                        'client_id': f"bot_{bot_message.id}_{int(time.time() * 1000)}"
+                    }
+
+                    manual_emit_to_room('message', bot_payload, room_str)
+                    print(f"🤖 [后台干预] 机器人消息已发送到房间 {room_str}")
+
+                    # 同步发送干预事件（管理员/普通用户）
+                    payload = {
+                        'type': 'intervention',
+                        'message': intervention_result.message,
+                        'strategy': intervention_result.intervention_type.value,
+                        'timestamp': get_local_time().isoformat()
+                    }
+                    admin_payload = dict(payload)
+                    if intervention_result.reason:
+                        admin_payload['reason'] = intervention_result.reason
+                        admin_payload['is_admin_info'] = True
+                    manual_emit_to_room('intervention', payload, room_str)
+                    manual_emit_to_room('intervention_admin', admin_payload, room_str)
+
+        except Exception as e:
+            print(f"❌ [后台干预] 任务错误: {e}")
+
+    socketio.start_background_task(_process_intervention_background, str(room), int(user.id), (user.display_name or user.username), user.gender, int(message.id))
+    print(f"🚀 [后台干预] 任务已启动 (房间{room}, 消息{message.id})")
+
     print(f'=== send_message事件处理完成 ===')
+    return
+
+
+
+
+# @socketio.on('chat_message')
+# async def handle_chat_message(data):
+#     print(f'=== 开始处理chat_message事件 ===')
+#     print(f'收到WebSocket消息: {data}')
+#     print(f'数据类型: {type(data)}')
+#     print(f'数据内容: {json.dumps(data, default=str) if data else "None"}')
+    
+#     room = data.get('room')
+#     message_data = data.get('message')
+    
+#     print(f'房间: {room}, 消息数据: {message_data}')
+    
+#     if not room or not message_data:
+#         print('房间或消息数据为空，退出处理')
+#         return
+    
+#     print(f'=== 数据验证通过，继续处理 ===')
+    
+#     # 获取用户信息
+#     user_id = session.get('user_id')
+#     print(f'从session获取的用户ID: {user_id}')
+    
+#     if not user_id and current_user.is_authenticated:
+#         user_id = current_user.id
+#         print(f'从current_user获取的用户ID: {user_id}')
+    
+#     print(f'最终用户ID: {user_id}')
+    
+#     # 如果没有用户ID（测试页面），使用默认用户
+#     if not user_id:
+#         print('无法获取用户ID，使用默认用户')
+#         user = User.query.first()  # 获取第一个用户作为默认用户
+#         if not user:
+#             # 如果没有用户，创建一个默认用户
+#             user = User(
+#                 username='test_user',
+#                 email='test@example.com',
+#                 password_hash='test',
+#                 display_name='测试用户',
+#                 gender='unknown'
+#             )
+#             db.session.add(user)
+#             db.session.commit()
+#             print(f'创建默认用户: {user.username}')
+#         else:
+#             print(f'使用现有用户: {user.username}')
+#     else:
+#         user = User.query.get(user_id)
+#         if not user:
+#             print('用户不存在')
+#             return
+    
+#     print(f'用户信息: {user.username}')
+    
+#     # 创建消息记录
+#     message = Message(
+#         content=message_data['content'],
+#         author=user.display_name or user.username,
+#         gender=user.gender,
+#         room_id=int(room),
+#         user_id=user.id
+#     )
+    
+#     print(f'创建消息: {message.content}')
+    
+#     db.session.add(message)
+#     db.session.commit()
+    
+#     print(f'消息已保存到数据库，ID: {message.id}')
+    
+#     # 构建消息数据
+#     message_info = {
+#         'id': message.id,
+#         'content': message.content,
+#         'author': message.author,
+#         'avatar': user.avatar,  # 添加用户头像
+#         'timestamp': message.timestamp.isoformat(),
+#         'has_interruption': message.has_interruption,
+#         'interruption_type': message.interruption_type,
+#         'intervention_applied': message.intervention_applied,
+#         'client_id': message_data.get('client_id'),
+#         'room': room
+#     }
+    
+#     print(f'准备广播消息: {message_info}')
+#     print(f'广播到房间: {room}')
+    
+#     # 确保room是字符串类型
+#     room = str(room)
+    
+#     # 获取房间内当前连接的客户端数量
+#     from flask_socketio import rooms
+#     room_clients = rooms(room)
+#     print(f'房间 {room} 内当前连接的客户端: {room_clients}')
+#     print(f'当前客户端ID: {request.sid}')
+    
+#     # 使用更可靠的广播方法
+#     try:
+#         # 方法1：使用socketio.emit到房间
+#         socketio.emit('message', message_info, room=room)
+#         print(f'消息已广播到房间 {room}')
+        
+#         # 方法2：如果房间为空，广播给所有连接的客户端（备用方案）
+#         if not room_clients:
+#             print(f'房间 {room} 为空，广播给所有客户端')
+#             socketio.emit('message', message_info)
+#             print(f'消息已广播给所有客户端')
+            
+#     except Exception as e:
+#         print(f'广播消息时出错: {e}')
+#         # 备用方案：广播给所有客户端
+#         socketio.emit('message', message_info)
+#         print(f'使用备用方案广播消息')
+    
+#     print(f'=== chat_message事件处理完成 ===')
+
+
+#   2025.08.27 新增 完整替换上方接口：handle_chat_message
 
 @socketio.on('chat_message')
 async def handle_chat_message(data):
-    """处理发送消息 - 兼容旧的事件名"""
     print(f'=== 开始处理chat_message事件 ===')
     print(f'收到WebSocket消息: {data}')
     print(f'数据类型: {type(data)}')
@@ -1344,24 +2219,13 @@ async def handle_chat_message(data):
         print('房间或消息数据为空，退出处理')
         return
     
-    print(f'=== 数据验证通过，继续处理 ===')
-    
     # 获取用户信息
     user_id = session.get('user_id')
-    print(f'从session获取的用户ID: {user_id}')
-    
     if not user_id and current_user.is_authenticated:
         user_id = current_user.id
-        print(f'从current_user获取的用户ID: {user_id}')
-    
-    print(f'最终用户ID: {user_id}')
-    
-    # 如果没有用户ID（测试页面），使用默认用户
     if not user_id:
-        print('无法获取用户ID，使用默认用户')
-        user = User.query.first()  # 获取第一个用户作为默认用户
+        user = User.query.first()
         if not user:
-            # 如果没有用户，创建一个默认用户
             user = User(
                 username='test_user',
                 email='test@example.com',
@@ -1371,18 +2235,73 @@ async def handle_chat_message(data):
             )
             db.session.add(user)
             db.session.commit()
-            print(f'创建默认用户: {user.username}')
-        else:
-            print(f'使用现有用户: {user.username}')
     else:
         user = User.query.get(user_id)
         if not user:
             print('用户不存在')
             return
-    
+
     print(f'用户信息: {user.username}')
-    
-    # 创建消息记录
+
+    # ===2025.8.27  新增：检查用户权限和房间成员资格 ===
+    # 检查用户是否有权限发送消息到此房间
+    # 管理员可以向任何房间发送消息
+    if not user.is_admin():
+        # 非管理员用户需要检查房间成员资格
+        membership = RoomMembership.query.filter_by(
+            user_id=user.id, room_id=int(room)
+        ).first()
+        if not membership:
+            print(f'用户 {user.username} 不是房间 {room} 的成员，拒绝发送消息')
+            notice = {
+                'id': -1,
+                'content': '您不是该房间的成员，无法发送消息。',
+                'author': 'System',
+                'avatar': '',
+                'timestamp': get_local_time().isoformat(),
+                'has_interruption': False,
+                'interruption_type': None,
+                'intervention_applied': False,
+                'room': str(room)
+            }
+            socketio.emit('message', notice, to=request.sid)
+            return
+    else:
+        # 管理员如果不是房间成员，自动加入
+        membership = RoomMembership.query.filter_by(
+            user_id=user.id, room_id=int(room)
+        ).first()
+        if not membership:
+            admin_membership = RoomMembership(
+                user_id=user.id,
+                room_id=int(room),
+                role='admin',
+                is_online=True
+            )
+            db.session.add(admin_membership)
+            db.session.commit()
+            print(f'管理员 {user.username} 自动加入房间 {room}')
+        
+    # ===2025.08.27  新增：如果当前已被禁言，直接拦截，不存库、不广播 ===
+    muted, remain = smart_intervention_engine.is_user_muted(str(room), str(user.id))
+    if muted:
+        # 只给本人一个提示，不影响他人（发到当前连接的 socket 会话）
+        notice = {
+            'id': -1,
+            'content': f'你已被禁言，还有 {remain} 秒后解除。',
+            'author': 'Chime',
+            'avatar': '',
+            'timestamp': get_local_time().isoformat(),
+            'has_interruption': False,
+            'interruption_type': None,
+            'intervention_applied': False,
+            'room': str(room)
+        }
+        socketio.emit('message', notice, to=request.sid)
+        print(f'[拦截] 用户({user.id}) 在房间({room})处于禁言中，拦截消息。')
+        return
+
+    # 保存消息
     message = Message(
         content=message_data['content'],
         author=user.display_name or user.username,
@@ -1390,20 +2309,130 @@ async def handle_chat_message(data):
         room_id=int(room),
         user_id=user.id
     )
-    
-    print(f'创建消息: {message.content}')
-    
     db.session.add(message)
     db.session.commit()
+
+    # === 新增：开关关闭则直接广播原消息并返回 ===
+    if not app.config.get('INTERVENTION_ENABLED', False):
+        message_info = {
+            'id': message.id,
+            'content': message.content,
+            'author': user.display_name or user.username,
+            'avatar': user.avatar,
+            'timestamp': message.timestamp.isoformat(),
+            'has_interruption': False,
+            'interruption_type': None,
+            'intervention_applied': False,
+            'client_id': message_data.get('client_id'),
+            'room': str(room)
+        }
+        socketio.emit('message', message_info, room=str(room))
+        return
+    # =========================================
+
     
-    print(f'消息已保存到数据库，ID: {message.id}')
+    # ===== 干预分析 =====
+    intervention_message = None
+    intervention_reason = None
+    bot_payload = None
+    suppress_user_message = False          # <=== 新增
+
+    # Debug: 追踪消息处理
+    print(f"💬 [SocketIO2] 收到消息: 用户{user.id}({user.display_name}) - '{message.content[:30]}...'")
+
+    # === 房间开关：关闭时只转发消息，不做智能干预 ===
+    room_obj = Room.query.get(int(room))
+    intervention_enabled = room_obj.chatbot_enabled if room_obj else False
+    print(f"🔧 [SocketIO2] 房间{room}干预开关状态: {intervention_enabled}")
+    if not intervention_enabled:
+        message_info = {
+            'id': message.id,
+            'content': message.content,
+            'author': user.display_name or user.username,
+            'avatar': user.avatar or '',
+            'timestamp': message.timestamp.isoformat(),
+            'has_interruption': False,
+            'interruption_type': None,
+            'intervention_applied': False,
+            'client_id': (message_data.get('client_id') if isinstance(message_data, dict) else None),
+            'room': str(room)
+        }
+        manual_emit_to_room('message', message_info, str(room))
+        print(f'[INFO] 房间{room}的Chatbot已关闭：仅转发消息，不做干预。已通过手动系统广播')
+        return
+
+
+    try:
+        intervention_result = smart_intervention_engine.analyze_message(
+            room_id=room,
+            user_id=str(user.id),
+            username=user.display_name or user.username,
+            message_content=message.content,
+            gender=user.gender
+        )
+        if intervention_result and intervention_result.should_intervene:
+            message.has_interruption = True
+            message.interruption_type = intervention_result.intervention_type.value
+            message.intervention_applied = True
+
+            intervention_message = intervention_result.message
+            intervention_reason = intervention_result.reason
+
+            # ====== 触发禁言 → 记录禁言并压制本条用户原消息 ======
+            if getattr(intervention_result, 'action', None) == 'mute':
+                seconds = getattr(intervention_result, 'mute_seconds', 300)
+                smart_intervention_engine.record_mute(str(room), str(user.id), seconds)
+                intervention_message = f"已对 {user.display_name or user.username} 进行 {int(seconds/60)} 分钟禁言。"
+                suppress_user_message = True
+            # ========================================================
+
+            intervention_record = Intervention(
+                room_id=int(room),
+                message_id=message.id,
+                strategy=intervention_result.intervention_type.value,
+                intervention_text=intervention_result.message,
+                trigger_type=intervention_result.intervention_type.value,
+                trigger_reason=intervention_result.reason,
+                intervention_type=intervention_result.intervention_type.value,
+                offense_level=intervention_result.offense_level.value if intervention_result.offense_level else None,
+                target_user=intervention_result.target_user,
+                is_visible_to_admin_only=True
+            )
+            db.session.add(intervention_record)
+
+            # === 新增：把“干预提示”也保存为普通消息（机器人）===
+            bot_message = Message(
+                content=intervention_message,
+                author='Chime',
+                gender='unknown',
+                room_id=int(room),
+                user_id=None
+            )
+            db.session.add(bot_message)
+            db.session.commit()
+
+            bot_payload = {
+                'id': bot_message.id,
+                'content': bot_message.content,
+                'author': bot_message.author,
+                'avatar': '',
+                'timestamp': bot_message.timestamp.isoformat(),
+                'has_interruption': False,
+                'interruption_type': None,
+                'intervention_applied': False,
+                'room': room,
+                'client_id': f"bot_{bot_message.id}_{int(time.time() * 1000)}"  # 确保唯一性和前端去重
+            }
+    except Exception as e:
+        print(f'干预分析失败: {e}')
+    db.session.commit()
     
-    # 构建消息数据
+    # ===== 构建消息数据 =====
     message_info = {
         'id': message.id,
         'content': message.content,
         'author': message.author,
-        'avatar': user.avatar,  # 添加用户头像
+        'avatar': user.avatar,
         'timestamp': message.timestamp.isoformat(),
         'has_interruption': message.has_interruption,
         'interruption_type': message.interruption_type,
@@ -1412,37 +2441,32 @@ async def handle_chat_message(data):
         'room': room
     }
     
-    print(f'准备广播消息: {message_info}')
-    print(f'广播到房间: {room}')
-    
-    # 确保room是字符串类型
     room = str(room)
-    
-    # 获取房间内当前连接的客户端数量
     from flask_socketio import rooms
     room_clients = rooms(room)
-    print(f'房间 {room} 内当前连接的客户端: {room_clients}')
-    print(f'当前客户端ID: {request.sid}')
     
-    # 使用更可靠的广播方法
+    # ===== 广播消息 + 插话 =====
     try:
-        # 方法1：使用socketio.emit到房间
-        socketio.emit('message', message_info, room=room)
-        print(f'消息已广播到房间 {room}')
-        
-        # 方法2：如果房间为空，广播给所有连接的客户端（备用方案）
+        if not suppress_user_message:
+            socketio.emit('message', message_info, room=room)
+        if bot_payload:
+            socketio.emit('message', bot_payload, room=room)
+
         if not room_clients:
-            print(f'房间 {room} 为空，广播给所有客户端')
-            socketio.emit('message', message_info)
-            print(f'消息已广播给所有客户端')
-            
+            if not suppress_user_message:
+                socketio.emit('message', message_info)
+            if bot_payload:
+                socketio.emit('message', bot_payload)
     except Exception as e:
         print(f'广播消息时出错: {e}')
-        # 备用方案：广播给所有客户端
-        socketio.emit('message', message_info)
-        print(f'使用备用方案广播消息')
-    
+        if not suppress_user_message:
+            socketio.emit('message', message_info)
+        if bot_payload:
+            socketio.emit('message', bot_payload)
+
     print(f'=== chat_message事件处理完成 ===')
+
+
 
 @app.route('/test_broadcast')
 def test_broadcast():
@@ -1636,7 +2660,239 @@ def get_live_conflict_detection():
             'error': str(e)
         }), 500
 
-# 新增：生成基于风格的干预消息
+
+# —— Chatbot 房间开关：查询 —— 
+@app.route('/api/admin/chatbot/enabled', methods=['GET'])
+@admin_required
+def get_chatbot_enabled():
+    room_id = request.args.get('room_id')
+    if not room_id:
+        return jsonify({'error': 'room_id is required'}), 400
+    
+    room = Room.query.get(int(room_id))
+    if not room:
+        return jsonify({'error': 'Room not found'}), 404
+        
+    return jsonify({'enabled': bool(room.chatbot_enabled)})
+
+# —— Chatbot 房间开关：设置 —— 
+@app.route('/api/admin/chatbot/enabled', methods=['POST'])
+@admin_required
+def set_chatbot_enabled():
+    data = request.get_json() or {}
+    enabled = bool(data.get('enabled', False))
+    room_id = data.get('room_id')
+    
+    if not room_id:
+        return jsonify({'error': 'room_id is required'}), 400
+    
+    room = Room.query.get(int(room_id))
+    if not room:
+        return jsonify({'error': 'Room not found'}), 404
+    
+    old_status = room.chatbot_enabled
+    room.chatbot_enabled = enabled
+    db.session.commit()
+
+    # 后台日志提示
+    if enabled != old_status:
+        if enabled:
+            print(f"🟢 [CHATBOT] 管理员已启用房间{room_id}的Chatbot - 开始智能监控和干预")
+            print(f"⏰ [CHATBOT] 房间{room_id}破冰将在检测到沉默时自动触发，不会立即破冰")
+        else:
+            print(f"🔴 [CHATBOT] 管理员已禁用房间{room_id}的Chatbot - 停止监控和干预")
+    
+    print(f"🔧 [CHATBOT] 房间{room_id}开关状态更新: {old_status} → {enabled}")
+
+    # 广播给该房间的前端
+    socketio.emit('chatbot_enabled_updated', {
+        'enabled': enabled,
+        'room_id': room_id,
+        'timestamp': datetime.now().isoformat()
+    }, room=str(room_id))
+    
+    # 同时使用手动房间管理系统确保消息到达
+    manual_emit_to_room('chatbot_enabled_updated', {
+        'enabled': enabled,
+        'room_id': room_id,
+        'timestamp': datetime.now().isoformat()
+    }, str(room_id))
+
+    return jsonify({'success': True, 'enabled': enabled})
+
+@app.route('/api/admin/monitor/status', methods=['GET'])
+@admin_required
+def get_monitor_status():
+    """获取实时监控状态"""
+    try:
+        stats = realtime_monitor.get_monitor_stats()
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+
+@app.route('/api/admin/interventions', methods=['GET'])
+@admin_required
+def get_interventions():
+    try:
+        room_id = request.args.get('room_id')
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 20))
+        
+        query = Intervention.query
+        if room_id:
+            query = query.filter_by(room_id=room_id)
+        
+        interventions = query.order_by(Intervention.created_at.desc()).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+        
+        result = []
+        for intervention in interventions.items:
+            # 获取关联的消息信息
+            message = Message.query.get(intervention.message_id)
+            
+            result.append({
+                'id': intervention.id,
+                'room_id': intervention.room_id,
+                'message_id': intervention.message_id,
+                'message_content': message.content if message else '',
+                'message_author': message.author if message else '',
+                'intervention_text': intervention.intervention_text,
+                'intervention_type': intervention.intervention_type,
+                'trigger_reason': intervention.trigger_reason,
+                'offense_level': intervention.offense_level,
+                'target_user': intervention.target_user,
+                'created_at': intervention.created_at.isoformat()
+            })
+        
+        return jsonify({
+            'interventions': result,
+            'total': interventions.total,
+            'pages': interventions.pages,
+            'current_page': page
+        })
+        
+    except Exception as e:
+        logger.error(f"获取干预记录失败: {e}")
+        return jsonify({'error': '获取失败'}), 500
+
+@app.route('/api/admin/interventions/export', methods=['GET'])
+@admin_required
+def export_interventions():
+    try:
+        room_id = request.args.get('room_id')
+        format_type = request.args.get('format', 'json')  # json, csv
+        
+        query = Intervention.query
+        if room_id:
+            query = query.filter_by(room_id=room_id)
+        
+        interventions = query.order_by(Intervention.created_at.desc()).all()
+        
+        export_data = []
+        for intervention in interventions:
+            message = Message.query.get(intervention.message_id)
+            room = Room.query.get(intervention.room_id)
+            
+            export_data.append({
+                'intervention_id': intervention.id,
+                'room_name': room.name if room else '未知房间',
+                'room_id': intervention.room_id,
+                'trigger_time': intervention.created_at.isoformat(),
+                'message_content': message.content if message else '',
+                'message_author': message.author if message else '',
+                'intervention_type': intervention.intervention_type,
+                'intervention_text': intervention.intervention_text,
+                'trigger_reason': intervention.trigger_reason,
+                'offense_level': intervention.offense_level,
+                'target_user': intervention.target_user
+            })
+        
+        if format_type == 'csv':
+            # 返回CSV格式
+            import csv
+            import io
+            output = io.StringIO()
+            
+            if export_data:
+                writer = csv.DictWriter(output, fieldnames=export_data[0].keys())
+                writer.writeheader()
+                writer.writerows(export_data)
+            
+            response = app.response_class(
+                output.getvalue(),
+                mimetype='text/csv',
+                headers={'Content-Disposition': f'attachment; filename=interventions_{room_id or "all"}.csv'}
+            )
+            return response
+        else:
+            # 返回JSON格式
+            return jsonify({
+                'data': export_data,
+                'total_count': len(export_data),
+                'export_time': get_local_time().isoformat()
+            })
+        
+    except Exception as e:
+        logger.error(f"导出干预记录失败: {e}")
+        return jsonify({'error': '导出失败'}), 500
+
+@app.route('/api/admin/intervention/stats', methods=['GET'])  
+@admin_required
+def get_intervention_stats():
+    try:
+        room_id = request.args.get('room_id')
+        days = int(request.args.get('days', 7))  # 默认最近7天
+        
+        # 计算日期范围
+        end_date = get_local_time()
+        start_date = end_date - timedelta(days=days)
+        
+        query = Intervention.query.filter(
+            Intervention.created_at >= start_date,
+            Intervention.created_at <= end_date
+        )
+        
+        if room_id:
+            query = query.filter_by(room_id=room_id)
+        
+        interventions = query.all()
+        
+        # 按类型统计
+        type_stats = {}
+        offense_stats = {}
+        daily_stats = {}
+        
+        for intervention in interventions:
+            # 按干预类型统计
+            itype = intervention.intervention_type
+            type_stats[itype] = type_stats.get(itype, 0) + 1
+            
+            # 按冒犯等级统计
+            if intervention.offense_level:
+                offense_stats[intervention.offense_level] = offense_stats.get(intervention.offense_level, 0) + 1
+            
+            # 按日期统计
+            date_key = intervention.created_at.strftime('%Y-%m-%d')
+            daily_stats[date_key] = daily_stats.get(date_key, 0) + 1
+        
+        return jsonify({
+            'total_interventions': len(interventions),
+            'intervention_types': type_stats,
+            'offense_levels': offense_stats,
+            'daily_stats': daily_stats,
+            'date_range': {
+                'start': start_date.isoformat(),
+                'end': end_date.isoformat(),
+                'days': days
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"获取干预统计失败: {e}")
+        return jsonify({'error': '获取统计失败'}), 500
 def generate_style_based_intervention(context_messages, trigger_type, style):
     """根据风格生成干预消息"""
     
@@ -1712,10 +2968,20 @@ def generate_style_based_intervention(context_messages, trigger_type, style):
         loop.close()
         return intervention
     except Exception as e:
-        print(f"GPT干预生成失败: {e}")
         # 返回备用消息
         return "让我们继续建设性的讨论。"
 
 
 if __name__ == '__main__':
+    # 显示Chatbot开关初始状态
+    enabled = app.config.get('INTERVENTION_ENABLED', False)
+    if enabled:
+        print("🟢 [CHATBOT] 系统启动 - Chatbot功能已启用")
+    else:
+        print("🔴 [CHATBOT] 系统启动 - Chatbot功能已禁用")
+    
+    # 启动实时监控系统
+    realtime_monitor.start_monitoring()
+    print("🚀 实时监控系统已启动")
+    
     socketio.run(app, debug=True, host='0.0.0.0', port=8081)

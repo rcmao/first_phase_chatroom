@@ -8,7 +8,7 @@ TRANSLATIONS = {
     "zh": {
         # 页面标题
         "page_title": "TKI性别意识智能干预聊天机器人",
-        "app_title": "TKI智能干预机器人",
+        "app_title": "Chime",
         "app_subtitle": "基于Thomas-Kilmann冲突管理模型的性别结构性边缘化干预系统",
         
         # 认证相关
@@ -64,7 +64,7 @@ TRANSLATIONS = {
         # 消息相关
         "message_sent": "消息发送成功",
         "message_failed": "发送失败，请重试",
-        "intervention_bot": "TKI干预机器人",
+        "intervention_bot": "Chime",
         "strategy": "TKI策略",
         "intervention_message": "干预消息",
         
@@ -114,7 +114,7 @@ TRANSLATIONS = {
         "invalid_format": "格式无效",
         
         # 提示消息
-        "welcome_message": "欢迎使用TKI智能干预机器人！",
+        "welcome_message": "欢迎使用 Chime！",
         "help_message": "点击左侧菜单开始使用",
         "no_messages": "暂无消息",
         "no_conversations": "暂无对话",
@@ -223,7 +223,7 @@ TRANSLATIONS = {
         # Messages
         "message_sent": "Message sent successfully",
         "message_failed": "Failed to send message, please try again",
-        "intervention_bot": "TKI Intervention Bot",
+        "intervention_bot": "Chime",
         "strategy": "TKI Strategy",
         "intervention_message": "Intervention Message",
         

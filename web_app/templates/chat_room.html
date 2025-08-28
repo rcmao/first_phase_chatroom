@@ -281,6 +281,73 @@
             font-size: 12px;
         }
 
+        /* 管理员专用干预样式 */
+        .admin-intervention {
+            border: 2px solid #ffc107;
+            border-radius: 8px;
+            background: rgba(255, 193, 7, 0.05);
+        }
+
+        .admin-intervention-content {
+            background: rgba(255, 193, 7, 0.15);
+            border-left: 4px solid #ffc107;
+            padding: 16px;
+            margin-top: 8px;
+            border-radius: 6px;
+        }
+
+        .admin-intervention-content .strategy {
+            font-weight: 700;
+            color: #e67e22;
+            margin-bottom: 8px;
+            font-size: 14px;
+            padding: 4px 8px;
+            background: rgba(230, 126, 34, 0.1);
+            border-radius: 4px;
+        }
+
+        .admin-intervention-content .trigger-reason {
+            color: #c0392b;
+            margin-bottom: 6px;
+            padding: 4px 8px;
+            background: rgba(192, 57, 43, 0.1);
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .admin-intervention-content .offense-level {
+            color: #8e44ad;
+            margin-bottom: 6px;
+            padding: 4px 8px;
+            background: rgba(142, 68, 173, 0.1);
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .admin-intervention-content .target-user {
+            color: #2980b9;
+            margin-bottom: 6px;
+            padding: 4px 8px;
+            background: rgba(41, 128, 185, 0.1);
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .admin-intervention-content .admin-message-text {
+            color: #27ae60;
+            padding: 8px;
+            background: rgba(39, 174, 96, 0.1);
+            border-radius: 4px;
+            border-left: 3px solid #27ae60;
+            margin-top: 8px;
+            font-size: 14px;
+        }
+
+        .admin-avatar {
+            border: 2px solid #ffc107 !important;
+            box-shadow: 0 0 10px rgba(255, 193, 7, 0.5) !important;
+        }
+
         .chat-input {
             padding: 16px;
             background: #36393f;
@@ -745,6 +812,60 @@
                 inset 0 1px 0 rgba(255,255,255,0.25);
         }
 
+        /* 管理员：Chatbot 开关（玻璃质感开关） */
+        .admin-switch-control {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+        }
+        .admin-switch-control .label-text {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.92);
+            font-weight: 600;
+        }
+        .admin-switch-control .hint {
+            color: #888;
+            font-size: 11px;
+        }
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 42px;
+            height: 22px;
+        }
+        .switch input { display: none; }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #4f545c;
+            transition: .2s;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px; width: 18px;
+            left: 1px; bottom: 1px;
+            background-color: white;
+            transition: .2s;
+            border-radius: 50%;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+        }
+        input:checked + .slider {
+            background-color: #5865f2;
+        }
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+
         /* 导出按钮样式 */
         .export-btn {
             display: flex;
@@ -829,6 +950,10 @@
             </div>
         </div>
 
+
+        <!-- 旧位置的开关移除，改为放到标题栏右侧并仅管理员可见 -->
+
+
         <!-- 主聊天区域 -->
         <div class="chat-area">
             <div class="chat-header">
@@ -853,6 +978,16 @@
                     <div class="language-switcher">
                         <button class="lang-btn" onclick="switchLanguage('zh')" id="zhBtn">中文</button>
                         <button class="lang-btn" onclick="switchLanguage('en')" id="enBtn">English</button>
+                    </div>
+                    <!-- 管理员可见：Chatbot 总开关 -->
+                    <div id="adminControl" class="admin-switch-control">
+                        <i class="fas fa-robot"></i>
+                        <span class="label-text">Chatbot</span>
+                        <label class="switch" title="启用 Chatbot 插话/干预">
+                            <input id="botSwitch" type="checkbox" onchange="setSwitch(this.checked)" />
+                            <span class="slider"></span>
+                        </label>
+                        <small id="botSwitchHint" class="hint"></small>
                     </div>
                     <i class="fas fa-bell-slash header-icon" title="静音通知"></i>
                     <i class="fas fa-bell header-icon" title="通知设置"></i>
@@ -997,6 +1132,14 @@
                     loadUsers();
                 }, 5000); // 每5秒刷新一次
                 
+                // 延迟初始化管理员控制面板，确保所有异步操作都完成
+                setTimeout(() => {
+                    console.log('🔧 [前端] 延迟检查管理员控制面板初始化...');
+                    if (currentUser) {
+                        maybeInitAdminControls();
+                    }
+                }, 2000);
+                
                 // 全局鼠标事件监听器，确保tooltip正确隐藏
                 document.addEventListener('mouseover', (event) => {
                     // 如果鼠标不在用户头像上，隐藏tooltip
@@ -1039,6 +1182,7 @@
                 if (response.ok) {
                     currentUser = await response.json();
                     updateCurrentUserDisplay();
+                    maybeInitAdminControls();
                 }
             } catch (error) {
                 console.error('加载用户信息失败:', error);
@@ -1069,6 +1213,27 @@
                 }
                 
                 console.log('侧边栏用户信息已更新:', displayName);
+            }
+        }
+
+        // 仅管理员显示并初始化 Chatbot 开关
+        function maybeInitAdminControls() {
+            const adminControl = document.getElementById('adminControl');
+            if (!adminControl) {
+                console.log('🔧 [前端] adminControl元素未找到');
+                return;
+            }
+            
+            if (currentUser && currentUser.role === 'admin') {
+                console.log('🔧 [前端] 检测到管理员用户，显示Chatbot控制面板');
+                adminControl.style.display = 'flex';
+                // 延迟一点刷新开关状态，确保DOM已经渲染
+                setTimeout(() => {
+                    refreshSwitch();
+                }, 100);
+            } else {
+                console.log('🔧 [前端] 非管理员用户，隐藏Chatbot控制面板');
+                adminControl.style.display = 'none';
             }
         }
 
@@ -1116,13 +1281,19 @@
             console.log('开始连接WebSocket...');
             const token = localStorage.getItem('token');
             
+            if (!token) {
+                console.error('没有找到登录token，无法连接WebSocket');
+                return;
+            }
+            
             // 统一连接到8080端口的WebSocket服务器
             // 不管当前页面在哪个端口，都连到8080
             const wsBase = `${window.location.protocol}//${window.location.hostname}:8080`;
             console.log('WebSocket连接地址:', wsBase);
+            console.log('使用token:', token.substring(0, 20) + '...');
             
             socket = io(wsBase, { 
-                query: { token },
+                query: { token: token },
                 transports: ['websocket', 'polling'],
                 upgrade: true,
                 rememberUpgrade: true
@@ -1156,21 +1327,23 @@
 
             // 消息监听器
             socket.on('message', (data) => {
-                console.log('收到消息:', data);
-                console.log('消息类型:', typeof data);
-                console.log('消息内容:', JSON.stringify(data));
-                console.log('消息房间:', data.room, '当前房间:', currentRoomId);
+                console.log('🎯 [前端] 收到消息:', data);
+                console.log('🎯 [前端] 消息类型:', typeof data);
+                console.log('🎯 [前端] 消息内容:', JSON.stringify(data));
+                console.log('🎯 [前端] 消息房间:', data.room, '当前房间:', currentRoomId);
+                console.log('🎯 [前端] 消息作者:', data.author);
+                console.log('🎯 [前端] 是否为Chatbot消息:', data.author === 'Chime');
                 
                 // 防御：仅处理当前房间的消息
                 if (String(data.room || currentRoomId) !== String(currentRoomId)) {
-                    console.log('消息房间不匹配，跳过');
+                    console.log('🎯 [前端] 消息房间不匹配，跳过');
                     return;
                 }
 
-                console.log('消息房间匹配，开始渲染...');
+                console.log('🎯 [前端] 消息房间匹配，开始渲染...');
                 // 使用addMessage函数来正确显示消息（包含去重）
                 addMessage(data);
-                console.log('addMessage函数调用完成');
+                console.log('🎯 [前端] addMessage函数调用完成');
             });
 
             socket.on('user_joined', (data) => {
@@ -1190,10 +1363,25 @@
             });
 
             socket.on('intervention', (data) => {
+                // 仅管理员看到策略卡片（黄色框）。普通成员忽略该事件，只看到普通回复消息
+                if (!window.currentUser || currentUser.role !== 'admin') return;
                 console.log('收到干预消息:', data);
                 addIntervention(data);
                 updateStats();
             });
+
+            // 2025.08.27 新增
+
+            // 管理员专用：含原因的干预消息
+            socket.on('intervention_admin', (data) => {
+                // 没拿到用户信息或不是管理员 → 直接忽略，避免普通成员看到重复卡片
+                if (!window.currentUser || currentUser.role !== 'admin') return;
+                console.log('收到管理员干预消息:', data);
+
+                // 管理员看到详细的干预信息（包含策略、原因等）
+                addAdminIntervention(data);
+            });
+
 
             // 测试事件监听器（已移除弹窗）
             socket.on('test', (data) => {
@@ -1217,6 +1405,34 @@
                 if (tkiStyleSelect && currentUser && currentUser.role === 'admin') {
                     tkiStyleSelect.value = data.style;
                     onTKIStyleChange();
+                }
+            });
+
+            // 处理强制刷新消息列表事件
+            socket.on('refresh_messages', (data) => {
+                console.log('🔄 [前端] 收到刷新消息事件:', data);
+                console.log('🔄 [前端] 当前房间ID:', currentRoomId);
+                console.log('🔄 [前端] 事件房间ID:', data.room_id);
+                // 强制重新加载消息列表
+                setTimeout(() => {
+                    console.log('🔄 [前端] 开始重新加载消息...');
+                    loadMessages();
+                    console.log('🔄 [前端] 消息重新加载完成');
+                }, 100);
+            });
+
+            // 监听Chatbot开关状态更新事件
+            socket.on('chatbot_enabled_updated', (data) => {
+                console.log('🔧 [前端] 收到Chatbot状态更新事件:', data);
+                // 只处理当前房间的状态更新
+                if (String(data.room_id) === String(currentRoomId)) {
+                    const sw = document.getElementById('botSwitch');
+                    const hint = document.getElementById('botSwitchHint');
+                    if (sw && hint) {
+                        sw.checked = !!data.enabled;
+                        hint.textContent = data.enabled ? '当前：已启用' : '当前：已关闭';
+                        console.log(`🔧 [前端] 房间${data.room_id}开关UI已同步更新:`, data.enabled ? '已启用' : '已关闭');
+                    }
                 }
             });
 
@@ -1255,26 +1471,24 @@
                         message: messageData
                     };
                     console.log('发送WebSocket事件:', emitData);
-                    // 乐观更新：先本地加入一条消息
+
+                    // 乐观渲染：先本地显示一条待确认的消息（依赖 client_id 去重）
                     addMessage({
-                        id: `local-${messageData.client_id}`,
+                        id: -1,
                         content: messageData.content,
-                        author: (currentUser.display_name || currentUser.username),
+                        author: currentUser.display_name || currentUser.username,
                         avatar: currentUser.avatar || '',
                         timestamp: new Date().toISOString(),
                         has_interruption: false,
                         interruption_type: null,
                         intervention_applied: false,
-                        client_id: messageData.client_id
+                        client_id: messageData.client_id,
+                        room: String(currentRoomId)
                     });
+
                     socket.emit('send_message', emitData);
                     input.value = '';
                     console.log('消息已发送到WebSocket');
-                    
-                    // 等待一下看看是否收到回复
-                    setTimeout(() => {
-                        console.log('3秒后检查是否收到消息...');
-                    }, 3000);
                 } else {
                     console.error('WebSocket未连接');
                 }
@@ -1382,15 +1596,23 @@
             }
         }
 
-        // 添加干预消息
+        // 添加干预消息（普通用户版本 - 只显示回复内容）
         function addIntervention(data) {
+            // 这个函数已经被前端事件监听器忽略了，因为普通用户不会收到 intervention 事件
+            // 但保留作为后备
+            console.log('addIntervention called (should not happen for regular users)');
+        }
+
+        // 添加管理员专用的详细干预信息
+        function addAdminIntervention(data) {
             const messagesContainer = document.getElementById('chatMessages');
             const interventionDiv = document.createElement('div');
-            interventionDiv.className = 'message';
+            interventionDiv.className = 'message admin-intervention';
             
             const avatar = document.createElement('div');
-            avatar.className = 'message-avatar';
+            avatar.className = 'message-avatar admin-avatar';
             avatar.innerHTML = '<i class="fas fa-robot"></i>';
+            avatar.style.background = '#ffc107';
             
             const content = document.createElement('div');
             content.className = 'message-content';
@@ -1400,11 +1622,10 @@
             
             const author = document.createElement('span');
             author.className = 'message-author';
-            author.textContent = 'TKI干预机器人';
+            author.textContent = 'Chime (管理员视图)';
             
             const timestamp = document.createElement('span');
             timestamp.className = 'message-timestamp';
-            // 显示本地时间，格式为 HH:MM:SS
             const localTime = new Date(data.timestamp).toLocaleTimeString('zh-CN', {
                 hour12: false,
                 hour: '2-digit',
@@ -1417,17 +1638,41 @@
             header.appendChild(timestamp);
             
             const interventionContent = document.createElement('div');
-            interventionContent.className = 'intervention-message';
+            interventionContent.className = 'intervention-message admin-intervention-content';
             
+            // 策略信息
             const strategy = document.createElement('div');
             strategy.className = 'strategy';
-            strategy.textContent = `干预策略: ${data.strategy}`;
+            strategy.textContent = `干预策略: ${data.strategy || '未知'}`;
             
+            // 触发原因
+            const reason = document.createElement('div');
+            reason.className = 'trigger-reason';
+            reason.innerHTML = `<strong>触发原因:</strong> ${data.reason || '未提供'}`;
+            
+            // 冒犯等级
+            if (data.offense_level) {
+                const offenseLevel = document.createElement('div');
+                offenseLevel.className = 'offense-level';
+                offenseLevel.innerHTML = `<strong>冒犯等级:</strong> ${data.offense_level}`;
+                interventionContent.appendChild(offenseLevel);
+            }
+            
+            // 目标用户
+            if (data.target_user) {
+                const targetUser = document.createElement('div');
+                targetUser.className = 'target-user';
+                targetUser.innerHTML = `<strong>目标用户:</strong> ${data.target_user}`;
+                interventionContent.appendChild(targetUser);
+            }
+            
+            // 回复内容
             const text = document.createElement('div');
-            text.className = 'message-text';
-            text.textContent = data.text;
+            text.className = 'message-text admin-message-text';
+            text.innerHTML = `<strong>机器人回复:</strong> ${data.message || data.text || ''}`;
             
             interventionContent.appendChild(strategy);
+            interventionContent.appendChild(reason);
             interventionContent.appendChild(text);
             
             content.appendChild(header);
@@ -2388,6 +2633,70 @@
             
             console.log('界面文本更新完成，当前语言:', currentLanguage);
         }
+        
+
     </script>
+
+    <script>
+        async function refreshSwitch(){
+            try{
+                const roomId = window.location.pathname.split('/').pop();
+                console.log(`🔧 [前端] 开始刷新房间${roomId}的Chatbot开关状态...`);
+                
+                // 检查DOM元素是否存在
+                const sw = document.getElementById('botSwitch');
+                const hint = document.getElementById('botSwitchHint');
+                if (!sw || !hint) {
+                    console.error('🔧 [前端] 开关UI元素未找到，sw:', !!sw, 'hint:', !!hint);
+                    return;
+                }
+                
+                const r = await fetch(`/api/admin/chatbot/enabled?room_id=${roomId}`, {
+                    method:'GET',
+                    headers:{ 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                });
+                
+                if (!r.ok) {
+                    throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+                }
+                
+                const j = await r.json();
+                console.log(`🔧 [前端] 房间${roomId}服务器返回开关状态:`, j);
+                
+                sw.checked = !!j.enabled;
+                hint.textContent = j.enabled ? '当前：已启用' : '当前：已关闭';
+                console.log(`🔧 [前端] 房间${roomId}开关UI已更新:`, j.enabled ? '已启用' : '已关闭');
+            }catch(e){ 
+                console.error('🔧 [前端] 刷新开关状态失败:', e);
+                // 设置默认状态
+                const sw = document.getElementById('botSwitch');
+                const hint = document.getElementById('botSwitchHint');
+                if (sw && hint) {
+                    sw.checked = false;
+                    hint.textContent = '当前：获取状态失败';
+                }
+            }
+            }
+
+            async function setSwitch(val){
+            try{
+                const roomId = window.location.pathname.split('/').pop();
+                console.log(`🔧 [前端] 设置房间${roomId}的Chatbot开关为:`, val);
+                await fetch('/api/admin/chatbot/enabled', {
+                method:'POST',
+                headers:{
+                    'Content-Type':'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                },
+                body: JSON.stringify({ enabled: !!val, room_id: roomId })
+                });
+                refreshSwitch();
+            }catch(e){ console.error(e); }
+            }
+
+        // 移除默认加载，避免普通用户访问管理员接口
+    </script>
+
+
 </body>
 </html> 
