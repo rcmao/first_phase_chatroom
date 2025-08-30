@@ -1,260 +1,281 @@
-# 💬 智能聊天室系统
+# TKI智能干预聊天机器人系统
 
-一个基于Flask的现代化聊天室应用，提供实时消息传递和用户管理功能。
+一个基于Flask和WebSocket的智能聊天室系统，集成了先进的AI干预引擎，专门用于足球话题讨论的智能管理和引导。
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![Flask](https://img.shields.io/badge/Flask-2.0+-green.svg)](https://flask.palletsprojects.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+## 🎯 核心功能
 
-## 🌟 功能特性
+### 智能干预引擎 (SmartInterventionEngine)
 
-### 核心聊天功能
-- 💬 **实时聊天**: 基于WebSocket的实时消息传递
-- 👥 **房间管理**: 创建和管理多个聊天房间
-- 👤 **用户系统**: 完整的用户注册、登录、个人资料管理
-- 🎨 **现代化界面**: Discord风格的聊天界面
-- 📱 **响应式设计**: 支持桌面和移动设备
-- 🔒 **安全认证**: 安全的用户认证和会话管理
+#### 🔍 实时内容检测
+- **毒性检测**: 使用GPT-4智能识别中文足球讨论中的冒犯性内容
+- **关键词匹配**: 本地词库检测，支持轻度/中度/严重三级分类
+- **冲突升级预警**: 检测连续冲突消息和激烈争吵
+- **话题偏离检测**: 智能判断讨论是否偏离足球主题
 
-### 🤖 智能干预系统
-- 🔇 **沉默检测**: 自动检测个人和群体沉默，适时破冰
-- ⚡ **冲突中断**: 智能检测并缓解对话中的冲突
-- 🎯 **话题引导**: 自动议程转换，保持对话活跃
-- 🚫 **恶语检测**: 实时检测并处理不当言论
-- 📈 **参与保证**: 确保所有成员都能参与对话
-- 🔄 **实时监控**: 后台持续监控聊天室状态
+#### 🛡️ 渐进式治理
+- **分级干预**: 提醒 → 警告 → 严肃警告（取消禁言功能）
+- **用户行为追踪**: 按房间+用户累计违规，支持时间窗清零
+- **节流机制**: 防止重复提醒，每人30秒冷却
+- **去重保护**: 避免同一内容短时间重复计数
 
-### 📊 分析与管理
-- 📊 **用户统计**: 聊天统计和用户活跃度分析
-- 🔧 **管理面板**: 完整的管理员控制界面
-- ⚙️ **灵活配置**: 可调节的干预阈值和策略参数
-- 🌐 **多语言支持**: 支持中文和英文界面
+#### 💬 智能引导
+- **沉默邀请**: 检测用户沉默，智能邀请参与讨论
+- **议程过渡**: 群体沉默时主动开启新话题
+- **结构引导**: 防止单用户连续发言，促进轮流讨论
+- **话题拉回**: 偏离主题时温和引导回足球话题
+
+#### 🤖 LLM集成
+- **智能文案生成**: 使用GPT生成自然、温和的干预消息
+- **多场景适配**: 沉默邀请、冲突提醒、话题引导等
+- **语气净化**: 自动清理轻佻口吻、重复标点、侮辱词
+- **失败回退**: LLM失败时使用预设模板兜底
+
+### 实时监控系统 (RealtimeMonitor)
+
+#### 📊 主动监控
+- **定时扫描**: 每10秒扫描所有活跃房间
+- **多维度检测**: 沉默、话题偏离、议程需要
+- **智能触发**: 不依赖消息，主动发现干预机会
+- **状态追踪**: 实时监控房间状态和用户行为
+
+#### 🎛️ 监控管理
+- **房间管理**: 动态添加/移除监控房间
+- **冷却控制**: 防止频繁干预，支持全局和专项冷却
+- **状态显示**: 终端实时显示监控状态
+- **错误处理**: 房间连续错误时自动移除监控
+
+#### 📈 统计分析
+- **干预统计**: 记录总扫描次数和干预次数
+- **房间状态**: 详细显示每个房间的沉默时长、消息数等
+- **管理员通知**: 实时向管理员发送监控状态
+- **性能监控**: 监控系统运行状态和性能指标
+
+## 🏗️ 系统架构
+
+### 核心组件
+```
+SmartInterventionEngine
+├── 内容检测模块
+│   ├── LLM毒性检测
+│   ├── 关键词匹配
+│   ├── 冲突升级检测
+│   └── 话题偏离检测
+├── 干预生成模块
+│   ├── 沉默邀请
+│   ├── 议程过渡
+│   ├── 结构引导
+│   └── 话题拉回
+├── 治理控制模块
+│   ├── 渐进式分级
+│   ├── 用户行为追踪
+│   ├── 节流去重
+│   └── 冷却管理
+└── LLM集成模块
+    ├── 智能文案生成
+    ├── 语气净化
+    └── 失败回退
+
+RealtimeMonitor
+├── 监控循环
+│   ├── 定时扫描
+│   ├── 房间状态检查
+│   └── 干预触发
+├── 状态管理
+│   ├── 房间管理
+│   ├── 冷却控制
+│   └── 错误处理
+└── 统计分析
+    ├── 干预统计
+    ├── 状态报告
+    └── 管理员通知
+```
+
+### 数据流
+1. **消息接收** → 智能引擎分析 → 生成干预结果
+2. **定时扫描** → 监控系统检测 → 主动触发干预
+3. **干预执行** → 数据库存储 → WebSocket广播
+4. **状态更新** → 统计记录 → 管理员通知
 
 ## 🚀 快速开始
 
-### 一键启动（推荐）
-
-```bash
-# 1. 克隆项目
-git clone <repository-url>
-cd first_phase_chatroom
-
-# 2. 一键启动
-./start_easy.sh
-```
-
-### 详细启动步骤
-
-#### 1. 环境准备
-```bash
-# 确保Python版本
-python3 --version  # 需要3.8+
-
-# 创建虚拟环境
-python3 -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# 或 .venv\Scripts\activate  # Windows
-```
-
-#### 2. 安装依赖
-```bash
-# 安装Python依赖
-pip install -r web_app/requirements.txt
-```
-
-#### 3. 配置环境
-```bash
-# 复制环境配置文件
-cp web_app/env.example web_app/.env
-
-# 编辑配置（可选）
-# nano web_app/.env
-```
-
-#### 4. 启动应用
-```bash
-# 方法一：使用快速启动脚本
-./start_easy.sh
-
-# 方法二：手动启动
-cd web_app
-python start_web.py
-```
-
-#### 5. 访问应用
-- **主页**: http://localhost:8080
-- **聊天室**: http://localhost:8080/rooms
-- **管理面板**: http://localhost:8080/admin
-
 ### 环境要求
 - Python 3.8+
-- pip
-- 现代浏览器（支持WebSocket）
+- Flask
+- Flask-SocketIO
+- OpenAI API (可选，用于LLM功能)
 
-### 安装步骤
-
-1. **克隆仓库**
-   ```bash
-   git clone https://github.com/rcmao/interruptive_chatbot-2.git
-   cd interruptive_chatbot-2
-   ```
-
-2. **安装依赖**
-   ```bash
-   cd web_app
-   pip install -r requirements.txt
-   ```
-
-3. **启动应用**
-   ```bash
-   python start_web.py
-   ```
-
-4. **访问聊天室**
-   
-   打开浏览器访问：**http://localhost:8080**
-
-### 默认用户账号
-
-系统会自动创建以下测试账号：
-
-- **管理员**: `admin` / `admin123`
-- **测试用户**: `tester` / `test123`
-- **测试用户1**: `test1_m` / `test123` (男性)
-- **测试用户2**: `test2_m` / `test123` (男性)
-
-## 📱 使用指南
-
-### 1. 注册/登录
-- 访问 http://localhost:8080
-- 点击"立即注册"创建新账号，或使用默认账号登录
-
-### 2. 进入聊天室
-- 登录后点击"房间列表"查看可用房间
-- 选择房间进入聊天界面
-
-### 3. 开始聊天
-- 在消息输入框中输入内容
-- 按回车键发送消息
-- 实时查看其他用户的消息
-
-### 4. 房间管理
-- 创建新房间
-- 管理房间成员
-- 查看房间统计信息
-
-## 🛠️ 技术栈
-
-### 后端
-- **Flask**: Python Web框架
-- **SQLAlchemy**: 数据库ORM
-- **Flask-Login**: 用户认证
-- **Flask-SocketIO**: WebSocket支持
-- **SQLite**: 轻量级数据库
-
-### 前端
-- **HTML5/CSS3**: 现代化界面
-- **JavaScript**: 交互逻辑
-- **Socket.IO**: 实时通信
-- **Font Awesome**: 图标库
-
-## 📁 项目结构
-
-```
-web_app/
-├── app.py                 # Flask主应用
-├── start_web.py          # 启动脚本
-├── requirements.txt      # Python依赖
-├── templates/            # HTML模板
-│   ├── index.html       # 首页
-│   ├── chat_room.html   # 聊天界面
-│   ├── rooms.html       # 房间列表
-│   └── dashboard.html   # 用户仪表板
-├── static/              # 静态文件
-│   ├── css/            # 样式表
-│   ├── js/             # JavaScript文件
-│   └── avatars/        # 用户头像
-└── instance/           # 数据库文件
-    ├── chatbot.db      # 用户数据库
-    └── chatroom.db     # 聊天记录数据库
+### 安装依赖
+```bash
+pip install -r requirements.txt
 ```
 
-## 🔧 配置说明
+### 环境配置
+```bash
+# 复制环境变量模板
+cp env.example .env
 
-### 环境变量
-复制 `web_app/env.example` 到 `web_app/.env` 并配置：
-
-```env
-SECRET_KEY=your-secret-key-here
+# 配置必要的环境变量
+OPENAI_API_KEY=your_openai_api_key  # 可选，用于LLM功能
+INTERVENTION_TONE=warm              # 干预语气：warm/neutral
+FOOTBALL_ON_TOPIC_RATIO=0.2         # 足球话题检测阈值
+GLOBAL_COOLDOWN=30                  # 全局冷却时间(秒)
+LLM_TOXICITY_ENABLED=true           # 启用LLM毒性检测
+LLM_INTERVENTION_ENABLED=true       # 启用LLM干预文案
 ```
 
-### 端口配置
-默认端口为8080，可在 `start_web.py` 中修改：
+### 启动系统
+```bash
+# 启动Web应用
+python app.py
 
+# 或使用启动脚本
+./start_web.py
+```
+
+## ⚙️ 配置说明
+
+### 干预参数
+- `silence_threshold`: 个人沉默阈值 (默认60秒)
+- `agenda_transition_threshold`: 群体沉默阈值 (默认30秒)
+- `global_cooldown_seconds`: 全局冷却时间 (默认30秒)
+- `warn_stage_threshold`: 警告阶段阈值 (默认2次)
+- `mute_stage_threshold`: 严肃警告阈值 (默认3次)
+
+### 监控参数
+- `scan_interval`: 监控扫描间隔 (默认10秒)
+- `max_silence_before_action`: 沉默触发阈值 (默认45秒)
+- `status_display_interval`: 状态显示间隔 (默认30秒)
+
+### LLM配置
+- `llm_model`: 毒性检测模型 (默认gpt-4o-mini)
+- `llm_message_model`: 文案生成模型 (默认gpt-4o-mini)
+- `llm_timeout`: API超时时间 (默认5秒)
+- `llm_conf_threshold`: 置信度阈值 (默认0.5)
+
+## 📊 监控界面
+
+### 终端监控
+系统在终端实时显示监控状态：
+```
+🎯 [14:30:15] 实时监控总览 - 扫描#123
+   📊 活跃房间: 2个
+   🤖 总干预次数: 15次
+   ⏱️ 扫描间隔: 10秒
+   🎚️ 沉默阈值: 45秒
+
+🔍 房间1 ✅ 用户沉默: 25s/45s
+🔍 房间2 🚨 用户沉默: 50s/45s
+```
+
+### 详细状态显示
+```
+🔍 房间 1 - 实时检测状态 [14:30:15]
+==========================================
+📊 基本信息:
+   总消息数: 25
+   用户消息: 20
+   用户沉默: 25秒
+   沉默阈值: 45秒
+
+🤫 沉默检测:
+   状态: ✅ 用户参与正常
+
+🎯 议程过渡:
+   状态: ✅ 话题流畅
+
+💬 活跃讨论:
+   状态: 🔥 讨论活跃
+
+⚽ 话题检测:
+   状态: ⚽ 在足球话题内
+```
+
+## 🔧 API接口
+
+### 智能干预引擎
 ```python
-socketio.run(app, debug=True, host='0.0.0.0', port=8080)
+# 分析消息并生成干预
+result = engine.analyze_message(
+    room_id="1",
+    user_id="2", 
+    username="Lily",
+    message_content="皇马是垃圾球队",
+    gender="female"
+)
+
+# 检查用户禁言状态
+is_muted, remaining_seconds = engine.is_user_muted("1", "2")
+
+# 获取房间统计
+stats = engine.get_room_stats("1")
 ```
 
-## 📊 功能截图
+### 实时监控系统
+```python
+# 添加房间监控
+monitor.add_active_room("1")
 
-### 聊天界面
-- 实时消息显示
-- 用户在线状态
-- 消息时间戳
-- 响应式布局
+# 启动监控
+monitor.start_monitoring()
 
-### 房间管理
-- 房间列表
-- 创建新房间
-- 房间成员管理
-- 房间统计
+# 获取监控统计
+stats = monitor.get_monitor_stats()
+```
 
-### 用户系统
-- 用户注册/登录
-- 个人资料管理
-- 用户权限控制
-- 活跃度统计
+## 🎨 干预类型
 
-## 🐛 故障排除
+### 沉默邀请 (SILENCE_INVITATION)
+- **触发条件**: 用户沉默超过60秒
+- **示例**: "@Lily，也来聊聊你的看法吧～"
 
-### 常见问题
+### 议程过渡 (AGENDA_TRANSITION)  
+- **触发条件**: 群体沉默超过30秒
+- **示例**: "刚才关于传控的讨论很精彩，现在来说说新援表现怎么样？"
 
-1. **端口被占用**
-   ```bash
-   # 修改端口号
-   python start_web.py
-   # 或直接修改代码中的端口
-   ```
+### 结构引导 (STRUCTURE_GUIDANCE)
+- **触发条件**: 单用户连续发言4条或话题偏离
+- **示例**: "我们按顺序来一轮：每人用一句话说'最伟大的球队是谁'"
 
-2. **依赖安装失败**
-   ```bash
-   pip install --upgrade pip
-   pip install -r requirements.txt
-   ```
+### 冲突中断 (CONFLICT_INTERRUPTION)
+- **触发条件**: 检测到冒犯性语言或激烈争吵
+- **示例**: "@Lily 请避免使用可能冒犯的外号哦～"
 
-3. **数据库错误**
-   ```bash
-   # 删除数据库文件重新创建
-   rm web_app/instance/*.db
-   python start_web.py
-   ```
+## 🔒 安全特性
+
+- **渐进式治理**: 从温和提醒到严肃警告
+- **用户保护**: 防止误判和过度干预
+- **冷却机制**: 避免频繁打扰用户
+- **去重保护**: 防止重复干预
+- **错误恢复**: 系统异常时自动恢复
+
+## 📝 日志记录
+
+系统提供详细的日志记录：
+- 干预触发原因和结果
+- LLM调用状态和响应
+- 监控扫描统计
+- 错误和异常信息
+- 用户行为分析
+
+## 🤝 贡献指南
+
+1. Fork 项目
+2. 创建功能分支
+3. 提交更改
+4. 推送到分支
+5. 创建 Pull Request
 
 ## 📄 许可证
 
-本项目采用MIT许可证 - 详情请参阅 [LICENSE](LICENSE) 文件。
+本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
 
-## 🤝 贡献
+## 🆘 支持
 
-欢迎提交Issue和Pull Request来改进这个项目！
-
-### 贡献方式
-1. **报告Bug** - 在Issues中报告问题
-2. **建议改进** - 在Discussions中提出改进建议
-3. **提交代码** - Fork项目并提交Pull Requests
-4. **改进文档** - 帮助改进文档和示例
+如有问题或建议，请：
+- 查看 [Issues](../../issues) 
+- 提交新的 Issue
+- 联系开发团队
 
 ---
 
-⭐ 如果这个项目对您有帮助，请给我们一个星标！
-
-**让每一次对话都成为连接和分享的空间** 💬 
+**TKI智能干预聊天机器人系统** - 让足球讨论更友好、更智能 🚀 
