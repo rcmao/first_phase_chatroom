@@ -4,7 +4,7 @@ import threading
 import logging
 from typing import Dict, Optional
 from datetime import datetime
-from smart_intervention_engine import SmartInterventionEngine, InterventionResult
+from smart_intervention_engine import SmartInterventionEngine, InterventionResult, InterventionType
 from flask_socketio import emit
 
 # 配置日志
@@ -209,11 +209,12 @@ class RealtimeMonitor:
             print(f"🔍 [监控] 房间{room_id} 无消息历史")
             return None
             
-        # 计算房间最后活动时间
-        last_message_time = recent_messages[-1]['timestamp'] if recent_messages else 0
+        # 计算房间最后活动时间（忽略admin发言）
+        non_admin_messages = [m for m in recent_messages if not self.intervention_engine._is_admin_user(str(m.get('user_id')))]
+        last_message_time = non_admin_messages[-1]['timestamp'] if non_admin_messages else 0
         room_silence_duration = current_time - last_message_time
         
-        print(f"🔍 [监控] 房间{room_id} 最后消息: {room_silence_duration:.1f}秒前")
+        print(f"🔍 [监控] 房间{room_id} 最后(非admin)消息: {room_silence_duration:.1f}秒前")
         
         # 检查全局冷却
         last_intervention = self.intervention_engine.room_last_intervention_ts.get(room_id, 0)
@@ -252,13 +253,38 @@ class RealtimeMonitor:
         
         if not is_on_topic:
             recent_messages = list(self.intervention_engine.room_recent_messages.get(room_id, []))
-            if len(recent_messages) >= 5:  # 至少要有一些对话才判断跑题
+            if len(recent_messages) >= 3:  # 降低门槛：3条即可判断跑题
                 print(f"⚽ [监控] 房间{room_id} 检测到话题偏离")
                 
                 # 检查冷却时间
                 last_intervention = self.intervention_engine.room_last_intervention_ts.get(room_id, 0)
                 if current_time - last_intervention >= self.intervention_engine.global_cooldown_seconds:
-                    return self.intervention_engine._check_structure_guidance(room_id)
+                    # 先尝试结构化引导（若满足条件）
+                    result = self.intervention_engine._check_structure_guidance(room_id)
+                    if result:
+                        return result
+                    # 兜底：直接生成轻量“话题拉回”干预，确保前端可见
+                    # 话题拉回专用冷却（避免重复提醒）
+                    try:
+                        if not self.intervention_engine._topic_cooldown_ok(room_id):
+                            return None
+                    except Exception:
+                        pass
+                    try:
+                        fallback_msg = self.intervention_engine._compose_topic_pullback(room_id, reason="off_topic")
+                    except Exception:
+                        fallback_msg = "稍作提醒：讨论有点发散，我们回到足球主题聊聊～"
+                    # 标记话题拉回已触发
+                    try:
+                        self.intervention_engine._mark_topic_pullback(room_id)
+                    except Exception:
+                        pass
+                    return InterventionResult(
+                        should_intervene=True,
+                        intervention_type=InterventionType.STRUCTURE_GUIDANCE,
+                        message=fallback_msg,
+                        reason="topic_drift_detected"
+                    )
                     
         return None
         
@@ -281,9 +307,15 @@ class RealtimeMonitor:
                     logger.error(f"❌ 导入失败: {e}")
                     return
                 
+                # 服务端统一语气净化，移除多余标点/轻佻口吻/侮辱词，修正开头逗号
+                try:
+                    clean_text = self.intervention_engine._sanitize_tone(result.message)
+                except Exception:
+                    clean_text = result.message
+
                 # 创建chatbot消息记录
                 bot_message = Message(
-                    content=result.message,
+                    content=clean_text,
                     author='Chime',
                     gender='unknown',
                     room_id=int(room_id),
@@ -350,6 +382,21 @@ class RealtimeMonitor:
                     try:
                         self.socketio.emit('message', message_data)
                         logger.info(f"📡 [WebSocket-全局] 额外全局广播message，前端将按room过滤")
+                    except Exception as _:
+                        pass
+
+                    # 冗余兜底：再发送一次干预事件，前端也会将其渲染成普通消息
+                    try:
+                        intervention_payload = {
+                            'id': bot_message.id,
+                            'message': bot_message.content,
+                            'strategy': result.intervention_type.value,
+                            'reason': result.reason,
+                            'room_id': str(room_id),
+                            'timestamp': bot_message.timestamp.isoformat(),
+                            'client_id': message_data.get('client_id')
+                        }
+                        self.socketio.emit('intervention', intervention_payload, room=str(room_id))
                     except Exception as _:
                         pass
 
@@ -598,7 +645,7 @@ class RealtimeMonitor:
             # 2. 沉默检测
             print(f"\n🤫 沉默检测:")
             try:
-                silence_result = self.intervention_engine._check_silence_intervention(room_id)
+                silence_result = self.intervention_engine._check_silence_intervention(room_id, dry_run=True)
                 if silence_result and silence_result.should_intervene:
                     print(f"   状态: 🚨 检测到沉默用户")
                     print(f"   目标: {silence_result.target_user}")
@@ -609,10 +656,10 @@ class RealtimeMonitor:
             except Exception as e:
                 print(f"   状态: ❌ 检测失败: {e}")
             
-            # 3. 议程过渡检测
+            # 3. 议程过渡检测（展示使用 dry_run，避免消耗冷却却不发送）
             print(f"\n🎯 议程过渡:")
             try:
-                agenda_result = self.intervention_engine._check_agenda_transition(room_id)
+                agenda_result = self.intervention_engine._check_agenda_transition(room_id, dry_run=True)
                 if agenda_result and agenda_result.should_intervene:
                     print(f"   状态: 🚨 需要话题引导")
                     print(f"   原因: {agenda_result.reason}")
@@ -643,10 +690,13 @@ class RealtimeMonitor:
                     print(f"   状态: {'⚽ 在足球话题内' if is_on_topic else '🔄 偏离主题'}")
                     
                     if not is_on_topic:
-                        structure_result = self.intervention_engine._check_structure_guidance(room_id)
-                        if structure_result and structure_result.should_intervene:
+                        # 仅展示预期文案，不触发实际检测/冷却
+                        try:
+                            preview = self.intervention_engine._compose_topic_pullback(room_id, reason="off_topic")
                             print(f"   引导: 🔄 需要话题拉回")
-                            print(f"   消息: {structure_result.message[:60]}...")
+                            print(f"   消息: {preview[:60]}...")
+                        except Exception:
+                            print(f"   引导: 🔄 需要话题拉回 (预览生成失败)")
                 else:
                     print(f"   状态: ⏳ 消息不足 (需要3条以上)")
             except Exception as e:

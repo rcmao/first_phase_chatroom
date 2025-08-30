@@ -844,7 +844,10 @@ def get_room_messages(room_id):
             'timestamp': msg.timestamp.isoformat(),
             'has_interruption': msg.has_interruption,
             'interruption_type': msg.interruption_type,
-            'intervention_applied': msg.intervention_applied
+            'intervention_applied': msg.intervention_applied,
+            # 统一字段，便于前端过滤与去重
+            'room': str(room_id),
+            'client_id': f'history-{msg.id}'
         })
     
     return jsonify(message_list)
@@ -883,6 +886,16 @@ def send_message(room_id):
             db.session.commit()
             print(f'管理员 {current_user.id} 自动加入房间 {room_id}')
     
+    # === 禁言硬拦截（REST） ===
+    try:
+        muted, remain = smart_intervention_engine.is_user_muted(str(room_id), str(current_user.id))
+    except Exception:
+        muted, remain = (False, 0)
+    if muted:
+        return jsonify({'error': f'你已被禁言，还有 {remain} 秒后解除。'}), 403
+
+    suppress_user_message = False  # 触发禁言且目标为当前用户时，不广播本条
+
     # 创建消息
     message = Message(
         content=data['content'],
@@ -905,7 +918,8 @@ def send_message(room_id):
             'timestamp': message.timestamp.isoformat(),
             'has_interruption': False,
             'interruption_type': None,
-            'intervention_applied': False
+            'intervention_applied': False,
+            'room': str(room_id)
         }
         socketio.emit('message', message_data, room=str(room_id))
         return jsonify(message_data), 201
@@ -947,6 +961,34 @@ def send_message(room_id):
             )
             
             db.session.add(intervention_record)
+
+            # 触发禁言时（当前策略已不禁言，此逻辑保留兼容，若未来开启禁言则生效）
+            if getattr(intervention_result, 'action', None) == 'mute':
+                seconds = getattr(intervention_result, 'mute_seconds', 300)
+                target_name = getattr(intervention_result, 'target_user', None)
+                mute_user_id = current_user.id
+                mute_user_name = current_user.display_name or current_user.username
+
+                try:
+                    if target_name and target_name != mute_user_name:
+                        last_target_msg = Message.query.filter_by(
+                            room_id=int(room_id), author=target_name
+                        ).order_by(Message.timestamp.desc()).first()
+                        if last_target_msg and last_target_msg.user_id:
+                            mute_user_id = last_target_msg.user_id
+                            mute_user = User.query.get(mute_user_id)
+                            mute_user_name = mute_user.display_name or mute_user.username if mute_user else target_name
+                        else:
+                            mute_user = User.query.filter((User.display_name == target_name) | (User.username == target_name)).first()
+                            if mute_user:
+                                mute_user_id = mute_user.id
+                                mute_user_name = mute_user.display_name or mute_user.username
+                except Exception:
+                    pass
+
+                # 当前不执行禁言，仅保留兼容代码路径
+                # smart_intervention_engine.record_mute(str(room_id), str(mute_user_id), seconds)
+                suppress_user_message = False
             
     except Exception as e:
         # 如果智能干预失败，继续处理消息
@@ -963,11 +1005,18 @@ def send_message(room_id):
         'timestamp': message.timestamp.isoformat(),
         'has_interruption': message.has_interruption,
         'interruption_type': message.interruption_type,
-        'intervention_applied': message.intervention_applied
+        'intervention_applied': message.intervention_applied,
+        'room': str(room_id)
     }
     
-    # 发送消息到房间
-    socketio.emit('message', message_data, room=str(room_id))
+    # 发送消息到房间（如被禁言且对象就是当前用户，则不广播本条）
+    if not suppress_user_message:
+        try:
+            from app import manual_emit_to_room
+            manual_emit_to_room('message', message_data, str(room_id))
+        except Exception:
+            pass
+        socketio.emit('message', message_data, room=str(room_id))
     
     # 如果有干预，发送干预消息
     if message.intervention_applied and intervention_message:
@@ -975,7 +1024,8 @@ def send_message(room_id):
             'type': 'intervention',
             'message': intervention_message,
             'strategy': message.interruption_type,
-            'timestamp': get_local_time().isoformat()
+            'timestamp': get_local_time().isoformat(),
+            'room': str(room_id)
         }
         
         intervention_data_admin = intervention_data.copy()
@@ -984,6 +1034,34 @@ def send_message(room_id):
         
         socketio.emit('intervention', intervention_data, room=str(room_id))
         
+        # Fallback：将干预也作为一条普通机器人消息保存并广播，避免前端漏显
+        try:
+            bot_message = Message(
+                content=intervention_message,
+                author='Chime',
+                gender='unknown',
+                room_id=room_id,
+                user_id=None
+            )
+            db.session.add(bot_message)
+            db.session.commit()
+
+            bot_payload = {
+                'id': bot_message.id,
+                'content': bot_message.content,
+                'author': bot_message.author,
+                'avatar': '',
+                'timestamp': bot_message.timestamp.isoformat(),
+                'has_interruption': False,
+                'interruption_type': intervention_result.intervention_type.value if intervention_result else None,
+                'intervention_applied': True,
+                'room': str(room_id),
+                'client_id': f"chatbot-{int(time.time() * 1000)}"
+            }
+            socketio.emit('message', bot_payload, room=str(room_id))
+        except Exception as _:
+            pass
+
         # 单独给管理员发送包含原因的干预消息
         # socketio.emit('intervention_admin', intervention_data_admin, room=str(room_id))
         socketio.emit('intervention_admin', intervention_data_admin, room='admin_room')
@@ -2049,14 +2127,23 @@ def handle_send_message(data):
                         'avatar': '',
                         'timestamp': bot_message.timestamp.isoformat(),
                         'has_interruption': False,
-                        'interruption_type': None,
-                        'intervention_applied': False,
+                        'interruption_type': intervention_result.intervention_type.value if intervention_result else None,
+                        # 标记为干预消息，前端可直接显示并在刷新后保留
+                        'intervention_applied': True,
                         'room': room_str,
                         'client_id': f"bot_{bot_message.id}_{int(time.time() * 1000)}"
                     }
 
+                    # 发送到手动房间里的所有客户端
                     manual_emit_to_room('message', bot_payload, room_str)
-                    print(f"🤖 [后台干预] 机器人消息已发送到房间 {room_str}")
+
+                    # 兜底：房间广播一次（即使手动映射存在，也额外房间广播，避免时序问题）
+                    try:
+                        socketio.emit('message', bot_payload, room=room_str)
+                    except Exception as _:
+                        pass
+
+                    print(f"🤖 [后台干预] 机器人消息已发送到房间 {room_str}（手动+房间兜底）")
 
                     # 同步发送干预事件（管理员/普通用户）
                     payload = {
@@ -2071,6 +2158,15 @@ def handle_send_message(data):
                         admin_payload['is_admin_info'] = True
                     manual_emit_to_room('intervention', payload, room_str)
                     manual_emit_to_room('intervention_admin', admin_payload, room_str)
+
+                    # 提醒前端回补历史，防止偶发漏收
+                    try:
+                        socketio.emit('refresh_messages', {
+                            'room_id': room_str,
+                            'reason': 'chatbot_message_sync'
+                        }, room=room_str)
+                    except Exception as _:
+                        pass
 
         except Exception as e:
             print(f"❌ [后台干预] 任务错误: {e}")
@@ -2378,12 +2474,36 @@ async def handle_chat_message(data):
             intervention_message = intervention_result.message
             intervention_reason = intervention_result.reason
 
-            # ====== 触发禁言 → 记录禁言并压制本条用户原消息 ======
+            # ====== 触发禁言 → 找到真正的目标用户并执行禁言 ======
             if getattr(intervention_result, 'action', None) == 'mute':
                 seconds = getattr(intervention_result, 'mute_seconds', 300)
-                smart_intervention_engine.record_mute(str(room), str(user.id), seconds)
-                intervention_message = f"已对 {user.display_name or user.username} 进行 {int(seconds/60)} 分钟禁言。"
-                suppress_user_message = True
+                target_name = getattr(intervention_result, 'target_user', None)
+                mute_user_id = user.id
+                mute_user_name = user.display_name or user.username
+
+                try:
+                    # 优先根据房间内最近消息定位该昵称对应的 user_id（更可靠）
+                    if target_name and target_name != mute_user_name:
+                        last_target_msg = Message.query.filter_by(
+                            room_id=int(room), author=target_name
+                        ).order_by(Message.timestamp.desc()).first()
+                        if last_target_msg and last_target_msg.user_id:
+                            mute_user_id = last_target_msg.user_id
+                            mute_user = User.query.get(mute_user_id)
+                            mute_user_name = mute_user.display_name or mute_user.username if mute_user else target_name
+                        else:
+                            # 回退：直接查用户表（可能存在重名风险）
+                            mute_user = User.query.filter((User.display_name == target_name) | (User.username == target_name)).first()
+                            if mute_user:
+                                mute_user_id = mute_user.id
+                                mute_user_name = mute_user.display_name or mute_user.username
+                except Exception:
+                    pass
+
+                smart_intervention_engine.record_mute(str(room), str(mute_user_id), seconds)
+                intervention_message = f"已对 {mute_user_name} 进行 {int(seconds/60)} 分钟禁言。"
+                # 仅当禁言的是当前发送者时，才压制其本条原消息
+                suppress_user_message = (mute_user_id == user.id)
             # ========================================================
 
             intervention_record = Intervention(
@@ -2418,7 +2538,7 @@ async def handle_chat_message(data):
                 'avatar': '',
                 'timestamp': bot_message.timestamp.isoformat(),
                 'has_interruption': False,
-                'interruption_type': None,
+                'interruption_type': intervention_result.intervention_type.value if intervention_result else None,
                 'intervention_applied': False,
                 'room': room,
                 'client_id': f"bot_{bot_message.id}_{int(time.time() * 1000)}"  # 确保唯一性和前端去重

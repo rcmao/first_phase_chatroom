@@ -4,12 +4,27 @@
 
 ## 功能特性
 
+### 核心功能
 - 🎨 **Discord风格界面**: 现代化的聊天界面，类似Discord的用户体验
-- 👤 **用户系统**: 完整的注册、登录、登出功能
-- 💬 **对话管理**: 创建、管理多个对话会话
-- 🤖 **智能干预**: 基于TKI模型的性别意识智能干预
-- 📊 **分析报告**: 对话分析和干预策略统计
+- 👤 **用户系统**: 完整的注册、登录、登出功能，支持用户头像
+- 💬 **实时聊天**: 基于WebSocket的实时多人聊天室
+- 🤖 **智能干预**: 基于TKI模型的性别意识智能干预系统
+- 📊 **分析报告**: 实时对话分析和干预策略统计
 - 🔒 **安全认证**: JWT令牌认证和密码加密
+
+### 智能干预功能
+- 🔇 **沉默检测**: 自动检测个人和群体沉默，适时破冰
+- ⚡ **冲突中断**: 检测并缓解对话中的冲突情况
+- 🎯 **话题引导**: 智能议程转换，保持对话活跃
+- 🚫 **恶语检测**: 实时检测并处理不当言论
+- 📈 **参与保证**: 确保所有成员都能参与对话
+
+### 系统特性
+- 🔄 **实时监控**: 后台实时监控所有聊天室状态
+- ⚙️ **灵活配置**: 可调节的干预阈值和策略参数
+- 📱 **响应式设计**: 支持桌面和移动设备
+- 🌐 **多语言支持**: 支持中文和英文界面
+- 🔧 **管理面板**: 完整的管理员控制面板
 
 ## 技术栈
 
@@ -27,43 +42,83 @@
 
 ## 快速开始
 
-### 1. 安装依赖
+### 1. 环境准备
+
+确保已安装Python 3.8+：
+```bash
+python3 --version
+```
+
+### 2. 虚拟环境设置
+
+创建并激活虚拟环境：
+```bash
+# 在项目根目录下
+python3 -m venv .venv
+
+# 激活虚拟环境
+source .venv/bin/activate  # Linux/Mac
+# 或
+.venv\Scripts\activate     # Windows
+```
+
+### 3. 安装依赖
 
 ```bash
+# 进入web_app目录
 cd web_app
+
+# 安装Python依赖
 pip install -r requirements.txt
 ```
 
-### 2. 配置环境变量
+### 4. 配置环境变量
 
 复制环境变量示例文件：
-
 ```bash
 cp env.example .env
 ```
 
 编辑 `.env` 文件，设置必要的配置：
-
 ```env
 SECRET_KEY=your-secret-key-here
 OPENAI_API_KEY=your-openai-api-key-here
+OPENAI_API_BASE=https://api2.aigcbest.top/v1
 ```
 
-### 3. 启动应用
+### 5. 启动应用
 
-#### 方法一：使用启动脚本
+#### 方法一：使用快速启动脚本（推荐）
 ```bash
+# 在项目根目录下
+./start_easy.sh
+```
+
+#### 方法二：使用启动脚本
+```bash
+# 在web_app目录下
 python start_web.py
 ```
 
-#### 方法二：直接启动
+#### 方法三：直接启动
 ```bash
+# 在web_app目录下
 python app.py
 ```
 
-### 4. 访问应用
+### 6. 访问应用
 
-打开浏览器访问：http://localhost:8080
+启动成功后，打开浏览器访问：
+- **主应用**: http://localhost:8080
+- **聊天室**: http://localhost:8080/rooms
+- **管理面板**: http://localhost:8080/admin
+
+### 7. 初始化数据
+
+首次启动时，系统会自动：
+- 创建数据库表
+- 添加默认用户和房间
+- 启动实时监控系统
 
 ## 使用说明
 
@@ -162,22 +217,91 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///chatbot.db'
 
 1. **依赖安装失败**
    ```bash
+   # 升级pip
    pip install --upgrade pip
+   
+   # 重新安装依赖
+   pip install -r requirements.txt
+   
+   # 如果仍有问题，尝试清理缓存
+   pip cache purge
    pip install -r requirements.txt
    ```
 
-2. **数据库错误**
+2. **虚拟环境问题**
    ```bash
-   # 删除数据库文件重新创建
-   rm chatbot.db
-   python app.py
+   # 删除现有虚拟环境
+   rm -rf .venv
+   
+   # 重新创建虚拟环境
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -r web_app/requirements.txt
    ```
 
-3. **端口被占用**
+3. **数据库错误**
    ```bash
-   # 修改端口
-   app.run(debug=True, host='0.0.0.0', port=8080)
+   # 删除数据库文件重新创建
+   rm web_app/instance/chatbot.db
+   rm web_app/chatroom_with_intervention.db
+   
+   # 重启应用，数据库会自动重建
+   ./start_easy.sh
    ```
+
+4. **端口被占用**
+   ```bash
+   # 查看占用端口的进程
+   lsof -i :8080
+   
+   # 杀死占用进程
+   pkill -f start_web.py
+   
+   # 或者修改端口（在app.py中）
+   app.run(debug=True, host='0.0.0.0', port=8081)
+   ```
+
+5. **WebSocket连接失败**
+   ```bash
+   # 检查防火墙设置
+   # 确保8080端口没有被阻止
+   
+   # 尝试重启应用
+   ./start_easy.sh
+   ```
+
+6. **LLM API连接失败**
+   ```bash
+   # 检查.env文件配置
+   cat web_app/.env
+   
+   # 确保API密钥和基础URL正确
+   # OPENAI_API_KEY=your-api-key
+   # OPENAI_API_BASE=https://api2.aigcbest.top/v1
+   ```
+
+### 调试模式
+
+启用详细日志输出：
+```bash
+# 设置环境变量
+export FLASK_DEBUG=1
+export FLASK_ENV=development
+
+# 启动应用
+./start_easy.sh
+```
+
+### 日志查看
+
+查看应用日志：
+```bash
+# 实时查看日志
+tail -f web_app/server_8080.log
+
+# 查看最近的错误
+grep -i error web_app/server_8080.log | tail -10
+```
 
 ## 许可证
 

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>聊天房间</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -1333,7 +1333,10 @@
                 console.log('🎯 [前端] 消息房间:', data.room, '当前房间:', currentRoomId);
                 console.log('🎯 [前端] 消息作者:', data.author);
                 console.log('🎯 [前端] 是否为Chatbot消息:', data.author === 'Chime');
-                
+                // 若是机器人消息但房间号缺失，则补齐当前房间，避免过滤
+                if (!data.room && data.author === 'Chime') {
+                    data.room = String(currentRoomId);
+                }
                 // 防御：仅处理当前房间的消息
                 if (String(data.room || currentRoomId) !== String(currentRoomId)) {
                     console.log('🎯 [前端] 消息房间不匹配，跳过');
@@ -1341,9 +1344,28 @@
                 }
 
                 console.log('🎯 [前端] 消息房间匹配，开始渲染...');
+                // 为Chime的干预消息加上类型标签（例如冲突降温）
+                const tagged = { ...data };
+                try {
+                    if (tagged && tagged.author === 'Chime' && tagged.interruption_type) {
+                        const tagMap = {
+                            'conflict_interruption': '[友好提醒] ',
+                            'structure_guidance': '[话题拉回] '
+                        };
+                        const prefix = tagMap[tagged.interruption_type] || '';
+                        if (prefix && typeof tagged.content === 'string' && !tagged.content.startsWith(prefix)) {
+                            tagged.content = prefix + tagged.content;
+                        }
+                    }
+                } catch (_) {}
                 // 使用addMessage函数来正确显示消息（包含去重）
-                addMessage(data);
+                addMessage(tagged);
                 console.log('🎯 [前端] addMessage函数调用完成');
+
+                // 兜底：短延时主动同步一次，防止偶发漏显
+                setTimeout(() => {
+                    try { loadMessages(); } catch (e) { console.warn('同步消息失败:', e); }
+                }, 150);
             });
 
             socket.on('user_joined', (data) => {
@@ -1352,6 +1374,11 @@
                 // 立即重新加载用户列表
                 loadUsers();
                 console.log('loadUsers()调用完成');
+
+                // 兜底：有人加入时短延时同步一次历史消息
+                setTimeout(() => {
+                    try { loadMessages(); } catch (e) { console.warn('加入房间后同步消息失败:', e); }
+                }, 150);
             });
 
             socket.on('user_left', (data) => {
@@ -1363,11 +1390,35 @@
             });
 
             socket.on('intervention', (data) => {
-                // 仅管理员看到策略卡片（黄色框）。普通成员忽略该事件，只看到普通回复消息
-                if (!window.currentUser || currentUser.role !== 'admin') return;
-                console.log('收到干预消息:', data);
-                addIntervention(data);
-                updateStats();
+                // 所有人：以普通消息的形式看到Chatbot回复，保证不漏显
+                try {
+                    // 在前端标注干预类型，提升一致性（话题拉回/冲突降温）
+                    const tag = (data.strategy === 'structure_guidance') ? '[话题拉回] ' : (data.strategy === 'conflict_interruption' ? '[友好提醒] ' : '');
+                    addMessage({
+                        id: data.id || -1,
+                        content: tag + (data.message || data.text || ''),
+                        author: 'Chime',
+                        avatar: '',
+                        timestamp: new Date().toISOString(),
+                        has_interruption: false,
+                        interruption_type: null,
+                        intervention_applied: true,
+                        client_id: data.client_id || `bot_${Date.now()}`,
+                        room: String(data.room || data.room_id || currentRoomId)
+                    });
+                } catch (e) { console.error('渲染Chatbot干预消息失败:', e); }
+
+                // 管理员：另外显示策略卡片（包含原因/细节）
+                if (window.currentUser && currentUser.role === 'admin') {
+                    console.log('收到干预消息:', data);
+                    addIntervention(data);
+                    updateStats();
+                }
+
+                // 兜底：短延时主动同步一次历史消息
+                setTimeout(() => {
+                    try { loadMessages(); } catch (e) { console.warn('干预后同步消息失败:', e); }
+                }, 150);
             });
 
             // 2025.08.27 新增
@@ -1437,6 +1488,16 @@
             });
 
             console.log('WebSocket事件监听器已设置完成');
+
+            // 周期性兜底同步：页面可见且已连接时，每5秒补一次历史
+            try {
+                if (window.__msgSyncTimer) clearInterval(window.__msgSyncTimer);
+                window.__msgSyncTimer = setInterval(() => {
+                    if (!document.hidden && socket && socket.connected) {
+                        try { loadMessages(); } catch (e) { /* ignore */ }
+                    }
+                }, 5000);
+            } catch (e) { console.warn('启动消息周期同步失败:', e); }
         }
 
         // 发送消息
@@ -1508,6 +1569,32 @@
         }
 
         // 添加消息到界面
+        function safeParseTimestamp(ts) {
+            try {
+                if (!ts) return new Date();
+                if (typeof ts === 'number') {
+                    // 兼容秒级/毫秒级时间戳
+                    if (ts < 1e12) ts = ts * 1000;
+                    const d = new Date(ts);
+                    if (!isNaN(d.getTime())) return d;
+                }
+                if (typeof ts === 'string') {
+                    let s = ts.trim();
+                    // 截断 Python ISO 6位微秒到3位毫秒，避免 Safari/部分浏览器解析失败
+                    s = s.replace(/\.(\d{3})\d+/, '.$1');
+                    let d = new Date(s);
+                    if (!isNaN(d.getTime())) return d;
+                    // 若无时区信息，追加Z按UTC解析作为兜底
+                    if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) {
+                        d = new Date(s + 'Z');
+                        if (!isNaN(d.getTime())) return d;
+                    }
+                }
+            } catch (_) {}
+            console.warn('⚠️ 时间戳解析失败，使用当前时间兜底:', ts);
+            return new Date();
+        }
+
         function addMessage(data) {
             try {
             const messagesContainer = document.getElementById('chatMessages');
@@ -1563,8 +1650,9 @@
             
             const timestamp = document.createElement('span');
             timestamp.className = 'message-timestamp';
-                // 显示本地时间，格式为 HH:MM:SS
-                const localTime = new Date(data.timestamp).toLocaleTimeString('zh-CN', {
+                // 显示本地时间，格式为 HH:MM:SS（使用健壮解析）
+                const dt = safeParseTimestamp(data.timestamp);
+                const localTime = dt.toLocaleTimeString('zh-CN', {
                     hour12: false,
                     hour: '2-digit',
                     minute: '2-digit',
@@ -1577,7 +1665,16 @@
             
             const text = document.createElement('div');
             text.className = 'message-text';
-            text.textContent = data.content;
+            try {
+                const cleaned = String(data.content || '')
+                    .replace(/^\s+/, '')
+                    .replace(/^[，。！？!\?～~；;：:、,.\-]+/, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                text.textContent = cleaned;
+            } catch (_) {
+                text.textContent = data.content || '';
+            }
             
             content.appendChild(header);
             content.appendChild(text);
@@ -1692,9 +1789,11 @@
         // 加载消息历史
         async function loadMessages() {
             try {
-                const response = await fetch(`/api/rooms/${currentRoomId}/messages`, {
+                const ts = Date.now();
+                const response = await fetch(`/api/rooms/${currentRoomId}/messages?t=${ts}`, {
                     headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                        'Cache-Control': 'no-cache'
                     }
                 });
                 

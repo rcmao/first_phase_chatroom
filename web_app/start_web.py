@@ -129,7 +129,8 @@ def main():
         realtime_monitor.start_monitoring()
         print("🚀 实时监控系统已启动")
         
-        socketio.run(app, debug=True, host='0.0.0.0', port=8080)
+        # 重要：关闭debug和自动重载，避免多进程导致Socket.IO房间/广播不一致
+        socketio.run(app, debug=False, host='0.0.0.0', port=8080, use_reloader=False)
     except KeyboardInterrupt:
         pass
     except Exception as e:

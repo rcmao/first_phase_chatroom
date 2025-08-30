@@ -8,19 +8,88 @@
 
 ## 🌟 功能特性
 
+### 核心聊天功能
 - 💬 **实时聊天**: 基于WebSocket的实时消息传递
 - 👥 **房间管理**: 创建和管理多个聊天房间
 - 👤 **用户系统**: 完整的用户注册、登录、个人资料管理
 - 🎨 **现代化界面**: Discord风格的聊天界面
 - 📱 **响应式设计**: 支持桌面和移动设备
 - 🔒 **安全认证**: 安全的用户认证和会话管理
+
+### 🤖 智能干预系统
+- 🔇 **沉默检测**: 自动检测个人和群体沉默，适时破冰
+- ⚡ **冲突中断**: 智能检测并缓解对话中的冲突
+- 🎯 **话题引导**: 自动议程转换，保持对话活跃
+- 🚫 **恶语检测**: 实时检测并处理不当言论
+- 📈 **参与保证**: 确保所有成员都能参与对话
+- 🔄 **实时监控**: 后台持续监控聊天室状态
+
+### 📊 分析与管理
 - 📊 **用户统计**: 聊天统计和用户活跃度分析
+- 🔧 **管理面板**: 完整的管理员控制界面
+- ⚙️ **灵活配置**: 可调节的干预阈值和策略参数
+- 🌐 **多语言支持**: 支持中文和英文界面
 
 ## 🚀 快速开始
+
+### 一键启动（推荐）
+
+```bash
+# 1. 克隆项目
+git clone <repository-url>
+cd first_phase_chatroom
+
+# 2. 一键启动
+./start_easy.sh
+```
+
+### 详细启动步骤
+
+#### 1. 环境准备
+```bash
+# 确保Python版本
+python3 --version  # 需要3.8+
+
+# 创建虚拟环境
+python3 -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+# 或 .venv\Scripts\activate  # Windows
+```
+
+#### 2. 安装依赖
+```bash
+# 安装Python依赖
+pip install -r web_app/requirements.txt
+```
+
+#### 3. 配置环境
+```bash
+# 复制环境配置文件
+cp web_app/env.example web_app/.env
+
+# 编辑配置（可选）
+# nano web_app/.env
+```
+
+#### 4. 启动应用
+```bash
+# 方法一：使用快速启动脚本
+./start_easy.sh
+
+# 方法二：手动启动
+cd web_app
+python start_web.py
+```
+
+#### 5. 访问应用
+- **主页**: http://localhost:8080
+- **聊天室**: http://localhost:8080/rooms
+- **管理面板**: http://localhost:8080/admin
 
 ### 环境要求
 - Python 3.8+
 - pip
+- 现代浏览器（支持WebSocket）
 
 ### 安装步骤
 
