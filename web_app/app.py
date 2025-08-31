@@ -115,7 +115,7 @@ except ImportError as e:
         def __init__(self):
             # 简化的占位符实现，检测基本冒犯词汇
             self.user_last_message_time = {}
-            self.user_mute_until = {}  # 添加禁言管理
+            # 移除禁言管理属性
             self.user_message_count = {}
             self.room_recent_messages = {}
             self.offense_keywords = {
@@ -166,21 +166,7 @@ except ImportError as e:
             
             return None
         
-        def is_user_muted(self, room_id: str, user_id: str):
-            """检查用户是否被禁言"""
-            import time
-            key = f"{room_id}_{user_id}"
-            until_ts = self.user_mute_until.get(key, 0)
-            now = time.time()
-            if until_ts > now:
-                return True, int(until_ts - now)
-            return False, 0
-        
-        def record_mute(self, room_id: str, user_id: str, seconds: int):
-            """设置禁言到期时间"""
-            import time
-            key = f"{room_id}_{user_id}"
-            self.user_mute_until[key] = time.time() + max(1, seconds)
+        # 移除禁言相关方法
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
@@ -886,12 +872,9 @@ def send_message(room_id):
             db.session.commit()
             print(f'管理员 {current_user.id} 自动加入房间 {room_id}')
     
-    # === 禁言硬拦截（REST） ===
-    try:
-        muted, remain = smart_intervention_engine.is_user_muted(str(room_id), str(current_user.id))
-    except Exception:
-        muted, remain = (False, 0)
-    if muted:
+    # === 移除禁言检查，取消渐进式治理 ===
+    muted, remain = (False, 0)
+    if False:  # 禁言功能已移除
         return jsonify({'error': f'你已被禁言，还有 {remain} 秒后解除。'}), 403
 
     suppress_user_message = False  # 触发禁言且目标为当前用户时，不广播本条
@@ -957,7 +940,7 @@ def send_message(room_id):
                 intervention_type=intervention_result.intervention_type.value,
                 offense_level=intervention_result.offense_level.value if intervention_result.offense_level else None,
                 target_user=intervention_result.target_user,
-                is_visible_to_admin_only=True
+                is_visible_to_admin_only=False
             )
             
             db.session.add(intervention_record)
@@ -1859,7 +1842,7 @@ def get_tki_style_description(style):
 #                 intervention_type=intervention_result.intervention_type.value,
 #                 offense_level=intervention_result.offense_level.value if intervention_result.offense_level else None,
 #                 target_user=intervention_result.target_user,
-#                 is_visible_to_admin_only=True
+#                 is_visible_to_admin_only=False
 #             )
             
 #             db.session.add(intervention_record)
@@ -2013,9 +1996,9 @@ def handle_send_message(data):
             db.session.commit()
             print(f'管理员 {user.username} 自动加入房间 {room}')
 
-    # ===2025.8.27  新增：如果当前已被禁言，直接拦截，不存库、不广播 ===
-    muted, remain = smart_intervention_engine.is_user_muted(str(room), str(user.id))
-    if muted:
+    # === 移除禁言检查，取消渐进式治理 ===
+    muted, remain = (False, 0)
+    if False:  # 禁言功能已移除
         # 只给本人一个提示，不影响他人（发到当前连接的 socket 会话）
         notice = {
             'id': -1,
@@ -2105,7 +2088,7 @@ def handle_send_message(data):
                         intervention_type=intervention_result.intervention_type.value,
                         offense_level=intervention_result.offense_level.value if intervention_result.offense_level else None,
                         target_user=intervention_result.target_user,
-                        is_visible_to_admin_only=True
+                        is_visible_to_admin_only=False
                     )
                     db.session.add(intervention_record)
 
@@ -2378,9 +2361,9 @@ async def handle_chat_message(data):
             db.session.commit()
             print(f'管理员 {user.username} 自动加入房间 {room}')
         
-    # ===2025.08.27  新增：如果当前已被禁言，直接拦截，不存库、不广播 ===
-    muted, remain = smart_intervention_engine.is_user_muted(str(room), str(user.id))
-    if muted:
+    # === 移除禁言检查，取消渐进式治理 ===
+    muted, remain = (False, 0)
+    if False:  # 禁言功能已移除
         # 只给本人一个提示，不影响他人（发到当前连接的 socket 会话）
         notice = {
             'id': -1,
@@ -2500,10 +2483,9 @@ async def handle_chat_message(data):
                 except Exception:
                     pass
 
-                smart_intervention_engine.record_mute(str(room), str(mute_user_id), seconds)
-                intervention_message = f"已对 {mute_user_name} 进行 {int(seconds/60)} 分钟禁言。"
-                # 仅当禁言的是当前发送者时，才压制其本条原消息
-                suppress_user_message = (mute_user_id == user.id)
+                # 移除禁言功能，保留提醒消息
+                intervention_message = intervention_result.message
+                suppress_user_message = False  # 不再压制用户消息
             # ========================================================
 
             intervention_record = Intervention(
@@ -2516,7 +2498,7 @@ async def handle_chat_message(data):
                 intervention_type=intervention_result.intervention_type.value,
                 offense_level=intervention_result.offense_level.value if intervention_result.offense_level else None,
                 target_user=intervention_result.target_user,
-                is_visible_to_admin_only=True
+                is_visible_to_admin_only=False
             )
             db.session.add(intervention_record)
 
