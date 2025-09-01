@@ -29,7 +29,7 @@ class RealtimeMonitor:
         
         # 监控配置
         self.scan_interval = 10  # 每10秒扫描一次
-        self.max_silence_before_action = 45  # 45秒群体沉默触发议程转换
+        self.max_silence_before_action = 30  # 30秒群体沉默触发议程转换
         self.active_rooms = set()  # 活跃房间列表
         
         # 统计信息
@@ -250,21 +250,36 @@ class RealtimeMonitor:
         """检查话题偏离情况"""
         # 检查最近的讨论是否偏离足球主题
         is_on_topic = self.intervention_engine._is_on_topic_football(room_id, window=3)
-        
+
         if not is_on_topic:
             recent_messages = list(self.intervention_engine.room_recent_messages.get(room_id, []))
-            if len(recent_messages) >= 3:  # 降低门槛：3条即可判断跑题
+            if len(recent_messages) >= 3:  # 至少3条再考虑跑题
+                # 冲突窗口内禁止拉回，优先降温
+                try:
+                    last6 = [m for m in recent_messages[-6:] if m.get('content')]
+                    conflict_hits = sum(1 for m in last6 if self.intervention_engine._is_conflict_message(m.get('content', '')))
+                    if conflict_hits >= 2:
+                        return None
+                except Exception:
+                    pass
+
+                # 共享引导冷却：若未到冷却，跳过
+                try:
+                    if not self.intervention_engine._shared_guidance_cooldown_ok(room_id):
+                        return None
+                except Exception:
+                    pass
+
                 print(f"⚽ [监控] 房间{room_id} 检测到话题偏离")
-                
-                # 检查冷却时间
+
+                # 检查全局冷却
                 last_intervention = self.intervention_engine.room_last_intervention_ts.get(room_id, 0)
                 if current_time - last_intervention >= self.intervention_engine.global_cooldown_seconds:
-                    # 先尝试结构化引导（若满足条件）
+                    # 先尝试结构化引导
                     result = self.intervention_engine._check_structure_guidance(room_id)
                     if result:
                         return result
-                    # 兜底：直接生成轻量“话题拉回”干预，确保前端可见
-                    # 话题拉回专用冷却（避免重复提醒）
+                    # 兜底：生成轻量“话题拉回”
                     try:
                         if not self.intervention_engine._topic_cooldown_ok(room_id):
                             return None
@@ -274,9 +289,9 @@ class RealtimeMonitor:
                         fallback_msg = self.intervention_engine._compose_topic_pullback(room_id, reason="off_topic")
                     except Exception:
                         fallback_msg = "稍作提醒：讨论有点发散，我们回到足球主题聊聊～"
-                    # 标记话题拉回已触发
                     try:
                         self.intervention_engine._mark_topic_pullback(room_id)
+                        self.intervention_engine._mark_shared_guidance(room_id)
                     except Exception:
                         pass
                     return InterventionResult(
@@ -285,7 +300,7 @@ class RealtimeMonitor:
                         message=fallback_msg,
                         reason="topic_drift_detected"
                     )
-                    
+
         return None
         
     def _execute_intervention(self, room_id: str, result: InterventionResult):
@@ -367,23 +382,14 @@ class RealtimeMonitor:
                     # 使用手动房间管理系统发送消息（与用户消息相同的方式）
                     clients = get_room_clients(room_id)
                     if clients:
-                        # 手动房间广播
+                        # 仅手动房间广播（单通道）
                         manual_emit_to_room('message', message_data, room_id)
-                        # 房间广播兜底
-                        self.socketio.emit('message', message_data, room=str(room_id))
-                        logger.info(f"📡 [WebSocket] 已发送到房间{room_id}（手动+room兜底），客户端数: {len(clients)}")
+                        logger.info(f"📡 [WebSocket] 已发送到房间{room_id}（手动房间广播），客户端数: {len(clients)}")
                     else:
-                        # 无客户端时，仍尝试房间广播
-                        logger.warning(f"⚠️ [WebSocket-手动] 房间{room_id}没有客户端，使用房间广播兜底")
+                        # 无客户端时，尝试房间广播一次
+                        logger.warning(f"⚠️ [WebSocket-手动] 房间{room_id}没有客户端，使用room广播兜底")
                         self.socketio.emit('message', message_data, room=str(room_id))
-                        logger.info(f"📡 [WebSocket-传统] 备用方式发送到房间{room_id}")
-
-                    # 最终全局广播一次，防止房间映射或join时序问题导致漏收
-                    try:
-                        self.socketio.emit('message', message_data)
-                        logger.info(f"📡 [WebSocket-全局] 额外全局广播message，前端将按room过滤")
-                    except Exception as _:
-                        pass
+                        logger.info(f"📡 [WebSocket-传统] 兜底发送到房间{room_id}")
 
                     # 冗余兜底：再发送一次干预事件，前端也会将其渲染成普通消息
                     try:

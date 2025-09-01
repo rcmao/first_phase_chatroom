@@ -332,14 +332,160 @@ class ConflictDetector:
         else:
             return InterventionType.GENTLE_REDIRECT
     
-    def get_intervention_message(self, context_analysis: ContextualAnalysis) -> str:
-        """生成冲突干预消息"""
+    def get_intervention_message(self, context_analysis: ContextualAnalysis, 
+                                llm_analyzer: Optional['LLMEnhancedAnalyzer'] = None,
+                                room_id: str = '', conversation_history: List[Dict] = None) -> str:
+        """生成冲突干预消息 - 优先使用LLM生成自然消息"""
+        
+        # 尝试使用LLM生成自然的冲突调节消息
+        if llm_analyzer and llm_analyzer.enabled and conversation_history:
+            try:
+                # 构建简单的上下文
+                context_str = "\n".join([
+                    f"{msg.get('username', 'User')}: {msg.get('content', '')}" 
+                    for msg in conversation_history[-4:]  # 只取最近4条消息
+                ])
+                
+                # 简化的提示词
+                prompt = f"""你是群聊助手Chime，请为以下足球讨论生成一句友好的调节消息。
+
+对话内容：
+{context_str}
+
+要求：
+1. 15-30字，语气温和友善
+2. 像朋友间的劝说，避免说教
+3. 可以用语气词（如～、呢、吧）
+4. 引导回到理性足球讨论
+
+只输出调节消息，不要解释："""
+                
+                response = llm_analyzer._call_llm(prompt)
+                if response:
+                    message = response.strip().strip('"\'')
+                    if message and len(message) <= 40:
+                        print(f"🤖 [冲突LLM] 生成成功: '{message}'")
+                        return message
+                        
+            except Exception as e:
+                print(f"🤖 [冲突LLM] 生成失败: {e}")
+        
+        # 回退到固定模板
         if context_analysis.escalation_risk == 'high':
             return "大家先暂停一下，让我们回到理性讨论的轨道上。"
         elif context_analysis.interaction_pattern == 'heated_exchange':
             return "讨论有点激烈，我们放平心态，尊重不同观点。"
         else:
             return "建议大家保持友好的讨论氛围。"
+    
+    def _generate_conflict_message_with_llm(self, llm_analyzer: 'LLMEnhancedAnalyzer',
+                                          context_analysis: ContextualAnalysis,
+                                          room_id: str, conversation_history: List[Dict]) -> Optional[str]:
+        """使用LLM生成冲突调节消息"""
+        if not conversation_history:
+            return None
+        
+        # 构建上下文
+        context_str = "\n".join([
+            f"{msg.get('username', 'User')}: {msg.get('content', '')}" 
+            for msg in conversation_history[-6:]  # 最近6条消息
+        ])
+        
+        # 根据冲突情况选择提示词
+        if context_analysis.escalation_risk == 'high':
+            style = "紧急降温"
+            tone = "坚定但温和"
+            goal = "立即缓解激烈情绪，引导回归理性"
+        elif context_analysis.interaction_pattern == 'heated_exchange':
+            style = "友好调节"
+            tone = "轻松友善"
+            goal = "缓解争论气氛，促进理解"
+        elif context_analysis.interaction_pattern == 'bullying':
+            style = "保护干预"
+            tone = "公正坚定"
+            goal = "制止不当行为，维护讨论秩序"
+        else:
+            style = "轻柔提醒"
+            tone = "温和建议"
+            goal = "预防冲突升级"
+        
+        prompt = f"""你是群聊助手Chime，擅长化解冲突。请根据以下足球讨论情况，生成一句{style}的中文调节消息。
+
+当前情况：
+- 升级风险: {context_analysis.escalation_risk}
+- 交互模式: {context_analysis.interaction_pattern}  
+- 情绪趋势: {context_analysis.emotion_trend}
+
+对话内容：
+{context_str}
+
+要求：
+1. 语气{tone}，像朋友间的劝说
+2. 目标：{goal}
+3. 15-35字，简洁有效
+4. 可以用轻度语气词（如～、呢、吧）
+5. 结合足球话题，引导回到理性讨论
+6. 避免说教口吻，要自然亲切
+
+示例风格：
+- 高风险："哎呀大家别急～咱们好好聊足球，理性一点更有意思"
+- 激烈争论："讨论挺热烈的呢，不如各自说说支持的理由？"
+- 轻度冲突："来来来，足球观点本来就多样，咱们心平气和地聊～"
+
+只输出调节消息本身，不要解释。"""
+        
+        # 调用LLM
+        try:
+            response = llm_analyzer._call_llm(prompt)
+            if response:
+                # 清理响应
+                message = response.strip()
+                # 移除可能的引号
+                if message.startswith('"') and message.endswith('"'):
+                    message = message[1:-1]
+                if message.startswith("'") and message.endswith("'"):
+                    message = message[1:-1]
+                
+                # 应用内容净化
+                message = self._sanitize_tone_for_conflict(message)
+                
+                if message and len(message) <= 50:  # 确保长度合理
+                    print(f"🤖 [冲突LLM] 生成成功: '{message}'")
+                    return message
+                else:
+                    print(f"🤖 [冲突LLM] 消息过长或为空: '{message}'")
+            
+        except Exception as e:
+            print(f"🤖 [冲突LLM] 异常: {e}")
+        
+        return None
+    
+    def _sanitize_tone_for_conflict(self, text: str) -> str:
+        """专门为冲突调节消息净化语气"""
+        if not text:
+            return ''
+        
+        s = str(text).strip()
+        
+        # 移除过于严厉的词汇
+        harsh_words = ['警告', '严肃', '命令', '必须', '禁止', '不允许']
+        for word in harsh_words:
+            s = s.replace(word, '')
+        
+        # 移除重复标点
+        s = re.sub(r'([，。！？!?～~])\1+', r'\1', s)
+        
+        # 清理开头多余标点
+        s = re.sub(r'^[，。！？!?～~\s]+', '', s)
+        
+        # 确保友好结尾
+        if s and not s.endswith(('～', '。', '！', '？', '呢', '吧', '哦')):
+            if '?' in s or '？' in s:
+                s = s.rstrip('.,，。') + '？'
+            else:
+                s = s.rstrip('.,，。') + '～'
+        
+        return s.strip()
     
     def _assess_escalation_risk(self, emotion_scores: List[float]) -> str:
         """评估升级风险"""
@@ -538,13 +684,29 @@ class SmartInterventionEngine:
         api_key = os.getenv('OPENAI_API_KEY', '')
         base_url = os.getenv('OPENAI_BASE_URL') or os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1')
         model = os.getenv('LLM_MODEL', 'gpt-4o-mini')
-        timeout = float(os.getenv('LLM_TIMEOUT_SEC', '5.0'))
+        timeout = float(os.getenv('LLM_TIMEOUT_SEC', '10.0'))
+        
+        # 保持向后兼容的属性
+        self.llm_api_key = api_key
+        self.llm_model = model
+        self.llm_message_model = os.getenv('LLM_MESSAGE_MODEL', model)
+        self.llm_base_url = base_url
+        self.llm_timeout = timeout
         
         self.llm_analyzer = LLMEnhancedAnalyzer(api_key, base_url, model, timeout) if api_key else None
         
         # === 检测配置 ===
         self.detection_mode = os.getenv('DETECTION_MODE', 'hybrid').lower()  # 'toxicity', 'conflict', 'hybrid'
         self.llm_enabled = bool(api_key) and os.getenv('LLM_ENABLED', 'true').lower() == 'true'
+        # 兼容老配置项：是否启用基于LLM的干预文案生成（默认与llm_enabled一致，可用 LLM_INTERVENTION_ENABLED 覆盖）
+        self.llm_intervention_enabled = (
+            os.getenv('LLM_INTERVENTION_ENABLED', 'true').lower() == 'true'
+        ) and self.llm_enabled
+        # LLM连接状态（启动自检和运行期更新时写入）
+        self.llm_connection_status = {
+            'toxicity': False,
+            'intervention': False,
+        }
         self.llm_confidence_threshold = float(os.getenv('LLM_CONFIDENCE_THRESHOLD', '0.7'))
         
         # === 用户行为追踪 ===
@@ -608,6 +770,18 @@ class SmartInterventionEngine:
             "经典比赛", "球迷文化", "未来展望", "赛季总结", "伤病情况"
         ]
         
+        # === 话题转换模板 ===
+        self.agenda_transition_templates = [
+            "大家聊聊新的话题吧～刚才关于{current_topic}的讨论很精彩！",
+            "现在来说说{next_topic}怎么样？",
+            "刚才讨论得很热烈，我们聊聊{next_topic}吧！",
+            "换个角度，大家对{next_topic}有什么看法？",
+            "既然刚才聊了{current_topic}，那{next_topic}你们怎么看？",
+            "这个话题差不多了，我们聊聊{next_topic}怎么样？",
+            "让我们换个角度，{next_topic}大家怎么看？",
+            "顺着刚才的话题，{next_topic}也值得探讨一下。"
+        ]
+        
         self.icebreaker_theme = os.getenv(
             'ICEBREAKER_THEME',
             '今天的讨论题目是——哪个球队是全世界最好的球队？他们有最伟大的足球哲学吗？'
@@ -626,9 +800,13 @@ class SmartInterventionEngine:
         
         # === 话题拉回冷却 ===
         self.room_last_generic_pullback_ts = {}
-        self.generic_pullback_cooldown = 60
+        self.generic_pullback_cooldown = int(os.getenv('GENERIC_PULLBACK_COOLDOWN', '90'))
         self.room_last_topic_pullback_ts = {}
-        self.topic_pullback_cooldown = 60
+        self.topic_pullback_cooldown = int(os.getenv('TOPIC_PULLBACK_COOLDOWN', '120'))
+
+        # === 结构化引导类消息共享冷却（话题拉回 / 议程过渡 / 轮次引导） ===
+        self.room_last_guidance_ts = {}
+        self.guidance_cooldown_seconds = int(os.getenv('GUIDANCE_COOLDOWN', '180'))
         
         # === 最小检测门槛 ===
         self.min_rounds_for_conflict = int(os.getenv('MIN_CONFLICT_ROUNDS', '3'))
@@ -648,7 +826,7 @@ class SmartInterventionEngine:
         print(f"   ⚡ 冲突主动模式: {self.conflict_detector.proactive_mode}")
         
         if self.llm_enabled:
-        self._test_llm_connection_on_start()
+            self._test_llm_connection_on_start()
 
     def _test_llm_connection_on_start(self):
         """测试LLM连接状态"""
@@ -692,44 +870,20 @@ class SmartInterventionEngine:
         self.recent_intervention_messages[room_id].append((now, message))
 
     def _test_llm_connection_on_start(self):
-        """启动时测试LLM连接状态"""
-        if not self.llm_api_key or not self.llm_toxicity_enabled:
-            print("⚠️  LLM Toxicity Detection: DISABLED (no API key or feature disabled)")
+        """测试LLM连接状态"""
+        if not self.llm_analyzer:
+            print("⚠️  LLM分析器未启用 (无API密钥)")
             return
         
-        if not self.llm_intervention_enabled:
-            print("⚠️  LLM Intervention Messages: DISABLED")
-        
-        # 测试连接
         try:
-            import openai
-            client = openai.Client(
-                api_key=self.llm_api_key,
-                base_url=self.llm_base_url
-            )
-            
-            # 简单的测试调用
-            response = client.chat.completions.create(
-                model=self.llm_model,
-                messages=[{"role": "user", "content": "test"}],
-                max_tokens=10,
-                timeout=5
-            )
-            
-            if response.choices:
-                self.llm_connection_status['toxicity'] = True
-                print("✅ LLM Toxicity Detection: CONNECTED")
-                
-                if self.llm_intervention_enabled:
-                    self.llm_connection_status['intervention'] = True
-                    print("✅ LLM Intervention Messages: CONNECTED")
+            print("🔍 测试LLM连接...")
+            test_analysis = self.llm_analyzer.get_enhanced_analysis("测试", [])
+            if test_analysis:
+                print("✅ LLM连接测试成功")
             else:
-                print("❌ LLM Connection: Failed - no response")
-                
-        except ImportError:
-            print("❌ LLM Connection: Failed - openai library not installed")
+                print("⚠️  LLM连接测试失败 - 无响应")
         except Exception as e:
-            print(f"❌ LLM Connection: Failed - {str(e)}")
+            print(f"❌ LLM连接测试失败: {e}")
 
     def _get_recent_topic(self, room_id: str) -> Optional[str]:
         """尝试从最近消息中抽取一个话题关键词。
@@ -783,7 +937,8 @@ class SmartInterventionEngine:
 
             # 2) 过滤常见侮辱/挑衅词片段（最小侵入，只做静态替换）
             rude_tokens = [
-                '你懂个屁', '傻逼', '傻B', '垃圾', '滚', '废物', '闭嘴', '弱智', '狗东西', 'sb', 'SB', 'bb'
+                '你懂个屁', '傻逼', '傻B', '傻b', '傻x', '傻X', '垃圾', '滚', '废物', '闭嘴', '弱智', '狗东西',
+                'sb', 'SB', 's b', 'S B', 'bb', '黑哨', '你瞎了吧'
             ]
             for tok in rude_tokens:
                 s = s.replace(tok, '')
@@ -870,7 +1025,7 @@ class SmartInterventionEngine:
             prompt = (
                 "你是群聊助手Chime。基于以下对话，生成一句温柔、克制、非指责的提醒，"
                 "用中文引导@" + str(user) + " 回到足球观点本身，并在句末给一个具体可回答的问题，"
-                "问题需围绕‘最伟大的球队/足球哲学’，例如传控/反击/青训、代表比赛等。"
+                "问题需围绕'最伟大的球队/足球哲学'，例如传控/反击/青训、代表比赛等。"
                 "要求：1) 不复述敏感/冒犯词 2) 不用'警告/严肃'等词 3) 20-40字 4) 口吻自然像朋友。\n"
                 f"对话内容：\n{convo}"
             )
@@ -1051,7 +1206,7 @@ class SmartInterventionEngine:
         """调用LLM识别中文互联网足球梗/绰号/嘲讽/侮辱。失败返回None。"""
         import time  # 确保time模块在函数开头导入
         
-        if not (self.llm_toxicity_enabled and self.llm_api_key):
+        if not (self.llm_enabled and self.llm_api_key):
             return None
 
         recent_messages = list(self.room_recent_messages.get(room_id, []))[-last_n:]
@@ -1271,6 +1426,14 @@ class SmartInterventionEngine:
         if total >= 3 and ratio >= self.football_on_topic_ratio and is_active:
             return True
 
+        # 同一窗口内若检测到明显冲突，避免误判为跑题（让上层冲突逻辑先处理）
+        try:
+            conflict_hits = sum(1 for m in subset if self._is_conflict_message(m.get('content', '')))
+            if conflict_hits >= 2:
+                return True
+        except Exception:
+            pass
+
         # 稳健判定：仅当同时满足 GPT 判定为 False 且 关键词占比低于阈值（且消息数≥3）时，认为偏题
         if total >= 3 and (gpt_result is False) and (ratio < self.football_on_topic_ratio):
             return False
@@ -1379,6 +1542,18 @@ class SmartInterventionEngine:
         import time as _t
         self.room_last_topic_pullback_ts[room_id] = _t.time()
 
+    def _shared_guidance_cooldown_ok(self, room_id: str) -> bool:
+        """话题拉回/议程过渡/轮次引导共享冷却，避免短时多次引导刷屏。"""
+        room_id = str(room_id)
+        last_ts = self.room_last_guidance_ts.get(room_id, 0)
+        import time as _t
+        return (_t.time() - last_ts) >= self.guidance_cooldown_seconds
+
+    def _mark_shared_guidance(self, room_id: str):
+        room_id = str(room_id)
+        import time as _t
+        self.room_last_guidance_ts[room_id] = _t.time()
+
     def _summarize_recent_discussion(self, room_id: str, window: int = 6) -> str:
         """从最近若干条非管理员消息中提炼1-2句客观小结。
         尽量抓取常见球队/概念关键词，避免复述争执性/冒犯性措辞。"""
@@ -1408,7 +1583,10 @@ class SmartInterventionEngine:
         last = re.sub(r"[，。！？,.!]{2,}", "，", last)
         last = re.sub(r"@\w+", "", last)
         last = self._sanitize_tone(last)
-        return f"刚才主要围绕'{last[:12]}'展开"
+        # 避免在小结中回显可能的冒犯词，若净化后为空或仍含疑似词，退回通用描述
+        if not last or any(k in last for k in ['傻', 'sb', '黑哨', '滚', '弱智']):
+            return "大家刚才围绕球队与比赛角度展开"
+        return f"大家提到了 {last[:8]} 等角度"
 
     def analyze_message(self, room_id: str, user_id: str, username: str, 
                        message_content: str, gender: str = 'unknown') -> Optional[InterventionResult]:
@@ -1445,12 +1623,19 @@ class SmartInterventionEngine:
         # === 🎯 决策融合 ===
         intervention_decision = self._make_intervention_decision(
             content_analysis, context_analysis, llm_analysis, 
-            room_id, user_id, username, current_time
+            room_id, user_id, username, current_time, message_content
         )
         
         if intervention_decision.should_intervene:
             print(f"✅ [决策结果] 需要干预: {intervention_decision.intervention_type.value}, 优先级: {intervention_decision.priority}")
-            return self._convert_to_intervention_result(intervention_decision)
+            # 全通路启用房间级去重与全局冷却
+            if not self._is_duplicate_message(room_id, intervention_decision.message):
+                self._record_intervention_message(room_id, intervention_decision.message)
+                self.room_last_intervention_ts[room_id] = current_time
+                return self._convert_to_intervention_result(intervention_decision)
+            else:
+                print("⏸️ [去重] 干预消息重复，跳过发送")
+                return None
         
         # === 其他检测（沉默、议程过渡等）===
         other_result = self._check_other_interventions(room_id, current_time)
@@ -1494,7 +1679,8 @@ class SmartInterventionEngine:
                                   context_analysis: ContextualAnalysis,
                                   llm_analysis: Optional[LLMAnalysis],
                                   room_id: str, user_id: str, username: str,
-                                  current_time: float) -> InterventionDecision:
+                                  current_time: float,
+                                  message_content: str) -> InterventionDecision:
         """统一干预决策逻辑"""
         
         # === 🔴 优先级1：毒性检测（立即处理）===
@@ -1534,17 +1720,39 @@ class SmartInterventionEngine:
         # === 🟡 优先级2：冲突检测（上下文相关）===
         if self.detection_mode in ['conflict', 'hybrid']:
             if self.conflict_detector.should_intervene(context_analysis):
+                # 仅允许“当前或最近两条消息”触发的冲突进入（避免误报）
+                if not self._recent_conflict_triggered(room_id, window=2):
+                    return InterventionDecision(should_intervene=False)
                 # 检查冷却
                 if not self._is_global_cooldown_active(room_id, current_time):
+                    # 优先尝试定向、温和的短提醒
+                    targeted = self._check_conflict_intervention(room_id, user_id, message_content, username)
+                    if targeted and targeted.should_intervene:
+                        return InterventionDecision(
+                            should_intervene=True,
+                            intervention_type=targeted.intervention_type,
+                            priority='contextual',
+                            reason=targeted.reason or f'检测到冲突升级: {context_analysis.escalation_risk}风险, {context_analysis.interaction_pattern}模式',
+                            message=targeted.message,
+                            detection_source='conflict',
+                            confidence=0.8
+                        )
+                    # 否则回退到上下文型调解消息
                     intervention_type = self.conflict_detector.get_intervention_type(context_analysis)
+                    conflict_message = self.conflict_detector.get_intervention_message(
+                        context_analysis, 
+                        llm_analyzer=self.llm_analyzer,
+                        room_id=room_id,
+                        conversation_history=list(self.room_recent_messages.get(room_id, []))
+                    )
                     return InterventionDecision(
                         should_intervene=True,
                         intervention_type=intervention_type,
                         priority='contextual',
                         reason=f'检测到冲突升级: {context_analysis.escalation_risk}风险, {context_analysis.interaction_pattern}模式',
-                        message=self.conflict_detector.get_intervention_message(context_analysis),
+                        message=conflict_message,
                         detection_source='conflict',
-                        confidence=0.8  # 上下文分析相对可靠
+                        confidence=0.8
                     )
         
         # LLM冲突检测补充
@@ -1592,7 +1800,7 @@ class SmartInterventionEngine:
                 offense_level = ToxicityLevel.SEVERE
             elif 'moderate' in decision.reason.lower():
                 offense_level = ToxicityLevel.MODERATE
-        else:
+            else:
                 offense_level = ToxicityLevel.MILD
         elif 'conflict' in decision.detection_source:
             if 'high' in decision.reason.lower():
@@ -1601,6 +1809,8 @@ class SmartInterventionEngine:
                 offense_level = ConflictLevel.HEATED
             else:
                 offense_level = ConflictLevel.DISAGREEMENT
+        else:
+            offense_level = ToxicityLevel.MILD
         
         return InterventionResult(
             should_intervene=decision.should_intervene,
@@ -1783,7 +1993,7 @@ class SmartInterventionEngine:
                 msg = self._sanitize_tone(f"@{offender['username']} 提醒一下：请避免冒犯性称呼，一起友好讨论～")
                 return InterventionResult(
                     should_intervene=True,
-                    intervention_type=InterventionType.CONFLICT_INTERRUPTION,
+                    intervention_type=InterventionType.CONFLICT_DEESCALATION,
                     message=msg,
                     reason="defensive_utterance_redirect_to_offender",
                     offense_level=OffenseLevel.MILD,
@@ -1794,7 +2004,7 @@ class SmartInterventionEngine:
                 msg = self._sanitize_tone("先稍微缓一下，我们尊重彼此观点，继续平和交流～")
                 return InterventionResult(
                     should_intervene=True,
-                    intervention_type=InterventionType.CONFLICT_INTERRUPTION,
+                    intervention_type=InterventionType.CONFLICT_DEESCALATION,
                     message=msg,
                     reason="defensive_utterance_global_nudge",
                     offense_level=OffenseLevel.MILD
@@ -1802,7 +2012,7 @@ class SmartInterventionEngine:
         
         # === 🔍 双通道并行检测：LLM + 关键词，结果融合 ===
         print(f"🐛 [DEBUG] 检测模式: {self.conflict_detection_mode}")
-        print(f"🐛 [DEBUG] LLM启用: {self.llm_toxicity_enabled}")
+        print(f"🐛 [DEBUG] LLM启用: {self.llm_enabled}")
         print(f"🐛 [DEBUG] 消息内容: '{message_content}'")
         
         llm_result: Optional[Dict] = None
@@ -1822,25 +2032,24 @@ class SmartInterventionEngine:
                 if llm_result.get('should_intervene') and llm_result.get('confidence', 0) >= self.llm_conf_threshold:
                     llm_offense_level = self._map_llm_severity(llm_result.get('severity'))
                     print(f"🤖 [LLM检测] ✅ 检测到冒犯等级: {llm_offense_level.name if llm_offense_level else None}")
-                    
-                    # 紧急刹车：升级风险高时立即返回
+                # 紧急刹车：升级风险高时立即返回
                 if llm_result.get('escalation_risk') == 'high':
                     reason = "LLM判定升级风险高，触发紧急降温"
-                        print(f"🚨 [紧急刹车] {reason}")
+                    print(f"🚨 [紧急刹车] {reason}")
                     return InterventionResult(
                         should_intervene=True,
-                        intervention_type=InterventionType.CONFLICT_INTERRUPTION,
+                        intervention_type=InterventionType.CONFLICT_DEESCALATION,
                         message=self._sanitize_tone(
                             ("先暂停一下。请放松语气，尊重彼此观点，我们继续平和交流。")
                         ),
                         reason=reason,
-                            offense_level=llm_offense_level,
+                        offense_level=llm_offense_level,
                         via_llm=True, llm_confidence=llm_result.get('confidence'), llm_label=llm_result.get('label')
                     )
-        else:
-                    print(f"🤖 [LLM检测] ❌ 未通过检测 (置信度不足或should_intervene=false)")
             else:
-                print(f"🤖 [LLM检测] ❌ LLM调用失败")
+                print(f"🤖 [LLM检测] ❌ 未通过检测 (置信度不足或should_intervene=false)")
+        else:
+            print(f"🤖 [LLM检测] ❌ LLM调用失败")
         
         # 2️⃣ 关键词检测通道 (始终执行，除非是LLM-only且不允许回退)
         should_run_keywords = (
@@ -1849,7 +2058,7 @@ class SmartInterventionEngine:
         )
         
         if should_run_keywords:
-                current_msg_offense = self._detect_offense_level(message_content)
+            current_msg_offense = self._detect_offense_level(message_content)
             print(f"🔍 [关键词检测] 检测结果: {current_msg_offense.name if current_msg_offense else 'None'}")
         else:
             print(f"🚫 [关键词检测] 跳过 (LLM-only模式且不允许回退)")
@@ -1866,7 +2075,7 @@ class SmartInterventionEngine:
                 detection_source = ["LLM主导", f"关键词:{current_msg_offense.name}"]
                 via_llm = True
             else:
-            offense_level = current_msg_offense
+                offense_level = current_msg_offense
                 detection_source = ["关键词主导", f"LLM:{llm_offense_level.name}"]
                 via_llm = False
             print(f"🔗 [结果融合] LLM:{llm_offense_level.name} + 关键词:{current_msg_offense.name} → {detection_source[0]} 最终:{offense_level.name}")
@@ -1900,7 +2109,7 @@ class SmartInterventionEngine:
                     reason = f"检测到连续冲突消息，冲突等级: {conflict_count}/4"
                     return InterventionResult(
                         should_intervene=True,
-                        intervention_type=InterventionType.CONFLICT_INTERRUPTION,
+                        intervention_type=InterventionType.CONFLICT_DEESCALATION,
                         # 不要求贴数据，仅做降温
                         message=self._sanitize_tone("讨论有点激烈，大家先放松一下，理性沟通～"),
                         reason=reason,
@@ -1923,7 +2132,7 @@ class SmartInterventionEngine:
                         )
                         return InterventionResult(
                             should_intervene=True,
-                            intervention_type=InterventionType.CONFLICT_INTERRUPTION,
+                            intervention_type=InterventionType.CONFLICT_DEESCALATION,
                             message=msg,
                             reason="heated_two_person_argument",
                             offense_level=OffenseLevel.MODERATE
@@ -1952,7 +2161,7 @@ class SmartInterventionEngine:
             return None
         # 优先尝试 LLM 温柔提醒：若为毒性场景，改用更简短的 gentle_toxic
         llm_msg = None
-        # 若当前消息实为“劝阻/提醒别人不要用外号”，则不发毒性提醒，避免误伤
+        # 若当前消息实为"劝阻/提醒别人不要用外号"，则不发毒性提醒，避免误伤
         if not self._is_discouraging_offense(message_content) and (
             offense_level == OffenseLevel.SEVERE or (current_msg_offense == OffenseLevel.SEVERE if 'current_msg_offense' in locals() else False)
         ):
@@ -1999,7 +2208,7 @@ class SmartInterventionEngine:
 
         return InterventionResult(
             should_intervene=True,
-            intervention_type=InterventionType.CONFLICT_INTERRUPTION,
+            intervention_type=InterventionType.CONFLICT_DEESCALATION,
             message=template,
             reason=reason,
             offense_level=offense_level,
@@ -2218,9 +2427,9 @@ class SmartInterventionEngine:
         # 过滤掉admin消息，只看普通用户消息
         non_admin_messages = [msg for msg in recent_messages if not self._is_admin_user(str(msg['user_id']))]
         
-        # 群体沉默（与破冰不同）：需要至少3条非admin用户消息后才进入"群体沉默引导"判定
-        print(f"🔍 [群体沉默] 房间{room_id} 当前消息数: {len(non_admin_messages)} (要求≥3才判定群体沉默)")
-        min_msgs_for_group_silence = 3
+        # 群体沉默（与破冰不同）：需要至少2条非admin用户消息后才进入"群体沉默引导"判定
+        min_msgs_for_group_silence = 2
+        print(f"🔍 [群体沉默] 房间{room_id} 当前消息数: {len(non_admin_messages)} (要求≥{min_msgs_for_group_silence}才判定群体沉默)")
         
         # 如果没有任何消息，也可以主动开启话题
         if len(non_admin_messages) == 0:
@@ -2332,7 +2541,7 @@ class SmartInterventionEngine:
         if len(recent_messages) < 3:
             return None
 
-        # 活跃且在题内时，不做“话题拉回”类结构引导，避免误触发
+        # 活跃且在题内时，不做"话题拉回"类结构引导，避免误触发
         try:
             on_topic_now = self._is_on_topic_football(room_id, window=3)
         except Exception:
@@ -2341,7 +2550,20 @@ class SmartInterventionEngine:
             active_now = self._is_active_discussion(room_id)
         except Exception:
             active_now = False
+        # 活跃且在题内 → 不做结构引导
         if on_topic_now and active_now:
+            return None
+        # 冲突窗口内（最近6条包含≥2条冲突语）→ 禁止话题拉回，优先降温
+        try:
+            recent = list(self.room_recent_messages.get(room_id, []))
+            last6 = [m for m in recent[-6:] if m.get('content')]
+            conflict_hits = sum(1 for m in last6 if self._is_conflict_message(m.get('content', '')))
+            if conflict_hits >= 2:
+                return None
+        except Exception:
+            pass
+        # 共享冷却：若未到共享冷却，不触发
+        if not self._shared_guidance_cooldown_ok(room_id):
             return None
         
         # 连续发言统计：忽略管理员与Chatbot消息
@@ -2403,6 +2625,7 @@ class SmartInterventionEngine:
                 "我们按顺序来一轮：每人用一句话说'最伟大的球队是谁'，并给一个最能体现其'足球哲学'的例子。"
             )
             print(f"🤖 [LLM] 轮次引导 - LLM生成: '{llm_msg}', 最终消息: '{final_msg}'")
+            self._mark_shared_guidance(room_id)
             return InterventionResult(
                 should_intervene=True,
                 intervention_type=InterventionType.STRUCTURE_GUIDANCE,
@@ -2429,6 +2652,7 @@ class SmartInterventionEngine:
             if not self._topic_cooldown_ok(room_id):
                 return None
             self._mark_topic_pullback(room_id)
+            self._mark_shared_guidance(room_id)
             print(f"🤖 [LLM] 话题拉回 - LLM生成: '{llm_msg}', 最终消息: '{final_msg}'")
             return InterventionResult(
                 should_intervene=True,
@@ -2505,7 +2729,19 @@ class SmartInterventionEngine:
         return None
 
     def _is_conflict_message(self, content: str) -> bool:
-        
+        # 拉回话题/缓和白名单（命中则不判冲突）
+        whitelist_tokens = [
+            '回到主题', '回到足球', '聊回足球', '不要吵', '别吵了', '还是聊正题', '我们聊战术', '我们聊比赛',
+            # 缓和/中性描述，降低误报
+            '机制', '配置', '匹配', '分组优秀', '匹配机制', '分组机制', '阵容配置', '人员配置', '轮换机制'
+        ]
+        try:
+            for w in whitelist_tokens:
+                if w in content:
+                    return False
+        except Exception:
+            pass
+
         conflict_indicators = [
             '不对', '错了', '胡说', '放屁', '扯淡', '我不同意',
             '你这', '什么鬼', '太离谱', '无语', '服了',
@@ -2517,15 +2753,23 @@ class SmartInterventionEngine:
             if indicator in content_lower:
                 return True
         
+        # 弱化标点密度对冲突判断的影响，降低误报
         exclamation_count = content.count('!') + content.count('！')
         question_count = content.count('?') + content.count('？')
-        
-        if len(content) > 0:
-            punctuation_density = (exclamation_count + question_count) / len(content)
-            if punctuation_density > 0.1:
+        if len(content) > 20:
+            punctuation_density = (exclamation_count + question_count) / max(1, len(content))
+            if punctuation_density > 0.2:
                 return True
         
         return False
+
+    def _recent_conflict_triggered(self, room_id: str, window: int = 2) -> bool:
+        """仅允许最近window条内出现明显冲突词时触发群体降温，避免历史余波导致误报。"""
+        msgs = list(self.room_recent_messages.get(str(room_id), []))
+        if not msgs:
+            return False
+        recent = [m for m in msgs if m.get('content')][-max(1, window):]
+        return any(self._is_conflict_message(m.get('content', '')) for m in recent)
 
     def reset_room_data(self, room_id: str):
         room_id = str(room_id)  # 确保是字符串类型

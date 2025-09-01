@@ -44,18 +44,21 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # 导入项目模块
+# 修复导入路径（始终生效）
+import sys
+import os
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+sys.path.insert(0, project_root)
+
+# 始终使用真实的干预引擎（不可降级为占位）
+from smart_intervention_engine import SmartInterventionEngine, InterventionType, OffenseLevel
+
+# 可选模块导入失败时使用占位实现，避免影响核心运行
 try:
-    # 修复导入路径
-    import sys
-    import os
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(current_dir)
-    sys.path.insert(0, project_root)
-    
     from src.detectors.gpt4_realtime_context_analyzer import GPT4RealtimeContextAnalyzer
     from core.tki_gender_aware_bot import TKIGenderAwareBot
     from translations import get_text, get_language_list
-    from smart_intervention_engine import SmartInterventionEngine, InterventionType, OffenseLevel
 except ImportError as e:
     logger.error(f"导入项目模块失败: {e}")
     # 创建空的占位符类
@@ -111,62 +114,7 @@ except ImportError as e:
         """占位符语言列表函数"""
         return ['zh', 'en']
     
-    class SmartInterventionEngine:
-        def __init__(self):
-            # 简化的占位符实现，检测基本冒犯词汇
-            self.user_last_message_time = {}
-            # 移除禁言管理属性
-            self.user_message_count = {}
-            self.room_recent_messages = {}
-            self.offense_keywords = {
-                'mild': ['烂梗', '外号', '标签'],
-                'moderate': ['拉踩', '讨厌', '恶心'],
-                'severe': ['闭嘴', '废物', '垃圾']
-            }
-        
-        def analyze_message(self, room_id, user_id, username, message_content, gender='unknown'):
-            """简化的冒犯检测"""
-            message_lower = message_content.lower()
-            
-            # 检查严重冒犯
-            for word in self.offense_keywords['severe']:
-                if word in message_lower:
-                    return type('InterventionResult', (), {
-                        'should_intervene': True,
-                        'intervention_type': type('InterventionType', (), {'value': 'conflict_interruption'}),
-                        'message': '请保持基本的尊重，避免人身攻击。',
-                        'reason': f'检测到严重冒犯词汇: {word}',
-                        'offense_level': type('OffenseLevel', (), {'value': 'severe'}),
-                        'target_user': None
-                    })()
-            
-            # 检查中度冒犯
-            for word in self.offense_keywords['moderate']:
-                if word in message_lower:
-                    return type('InterventionResult', (), {
-                        'should_intervene': True,
-                        'intervention_type': type('InterventionType', (), {'value': 'conflict_interruption'}),
-                        'message': '该说法可能冒犯他人，请尝试换一种表达。',
-                        'reason': f'检测到中度冒犯词汇: {word}',
-                        'offense_level': type('OffenseLevel', (), {'value': 'moderate'}),
-                        'target_user': None
-                    })()
-            
-            # 检查轻度冒犯
-            for word in self.offense_keywords['mild']:
-                if word in message_lower:
-                    return type('InterventionResult', (), {
-                        'should_intervene': True,
-                        'intervention_type': type('InterventionType', (), {'value': 'conflict_interruption'}),
-                        'message': '提示：请尽量用客观表达，避免使用梗或标签化词汇。',
-                        'reason': f'检测到轻度不当词汇: {word}',
-                        'offense_level': type('OffenseLevel', (), {'value': 'mild'}),
-                        'target_user': None
-                    })()
-            
-            return None
-        
-        # 移除禁言相关方法
+    # 注意：不要在这里定义 SmartInterventionEngine 的占位实现，避免覆盖真实引擎
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
@@ -2064,12 +2012,23 @@ def handle_send_message(data):
                     return
 
                 print(f"🧠 [后台干预] 开始分析: 用户{user_obj_id} - '{msg.content[:30]}...'")
+                # --- 干预分析前的轻量白名单/放宽处理 ---
+                original_content = msg.content or ''
+                content_for_analysis = original_content
+                # 1) 拉回话题白名单：这些语句倾向于正向引导，避免被当作冲突
+                topic_pullback_whitelist = ['回到主题', '回到足球', '聊回足球', '回到正题']
+                is_topic_pullback = any(kw in original_content for kw in topic_pullback_whitelist)
+                # 2) 放宽允许的昵称：例如“胖虎”不触发毒性（仅用于判定，不改存储）
+                allowed_nicknames = ['胖虎']
+                for _nick in allowed_nicknames:
+                    content_for_analysis = content_for_analysis.replace(_nick, '【昵称】')
+
                 try:
-                    intervention_result = smart_intervention_engine.analyze_message(
+                    intervention_result = None if is_topic_pullback else smart_intervention_engine.analyze_message(
                         room_id=room_str,
                         user_id=str(user_obj_id),
                         username=user_display_name,
-                        message_content=msg.content,
+                        message_content=content_for_analysis,
                         gender=user_gender
                     )
                 except Exception as e:
@@ -2117,16 +2076,18 @@ def handle_send_message(data):
                         'client_id': f"bot_{bot_message.id}_{int(time.time() * 1000)}"
                     }
 
-                    # 发送到手动房间里的所有客户端
-                    manual_emit_to_room('message', bot_payload, room_str)
-
-                    # 兜底：房间广播一次（即使手动映射存在，也额外房间广播，避免时序问题）
-                    try:
-                        socketio.emit('message', bot_payload, room=room_str)
-                    except Exception as _:
-                        pass
-
-                    print(f"🤖 [后台干预] 机器人消息已发送到房间 {room_str}（手动+房间兜底）")
+                    # 发送到手动房间里的所有客户端（单通道）
+                    clients = get_room_clients(room_str)
+                    if clients:
+                        manual_emit_to_room('message', bot_payload, room_str)
+                        print(f"🤖 [后台干预] 机器人消息已发送到房间 {room_str}（手动房间广播）")
+                    else:
+                        # 无客户端时，兜底使用房间广播一次
+                        try:
+                            socketio.emit('message', bot_payload, room=room_str)
+                            print(f"🤖 [后台干预] 机器人消息兜底发送到房间 {room_str}（room广播）")
+                        except Exception as _:
+                            pass
 
                     # 同步发送干预事件（管理员/普通用户）
                     payload = {
