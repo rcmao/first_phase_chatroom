@@ -14,6 +14,8 @@
 
 ### 智能干预功能
 - 🔇 **沉默检测**: 自动检测个人和群体沉默，适时破冰
+  - **群体沉默**: 60秒无人发言时触发话题延续
+  - **个人沉默**: 90秒未发言的用户会被友好邀请参与（60秒冷却）
 - ⚡ **冲突中断**: 检测并缓解对话中的冲突情况
 - 🎯 **话题引导**: 智能议程转换，保持对话活跃
 - 🚫 **恶语检测**: 实时检测并处理不当言论
@@ -40,85 +42,195 @@
 - **JavaScript**: 交互逻辑
 - **Font Awesome**: 图标库
 
-## 快速开始
+## ⚡ 快速启动命令
 
-### 1. 环境准备
+### 最简启动方式
+```bash
+# 进入项目目录
+cd /Users/apple/Desktop/first_phase_chatroom_v1
+
+# 一键启动（推荐）
+./start_easy.sh
+```
+
+### 手动启动方式
+```bash
+# 进入项目目录
+cd /Users/apple/Desktop/first_phase_chatroom_v1
+
+# 激活虚拟环境
+source venv/bin/activate
+
+# 设置Python路径并启动
+export PYTHONPATH="$PWD:$PWD/web_app:$PWD/src"
+cd web_app
+python start_web.py
+```
+
+### 停止应用
+```bash
+# 方法1：在运行终端按 Ctrl+C
+# 方法2：新终端执行
+pkill -f start_web.py
+```
+
+---
+
+## 🚀 详细启动指南
+
+### 🚀 一键启动（推荐）
+
+1. **克隆项目并进入目录**
+   ```bash
+   cd /Users/apple/Desktop/first_phase_chatroom_v1
+   ```
+
+2. **激活虚拟环境**
+   ```bash
+   source venv/bin/activate
+   ```
+
+3. **设置Python路径并启动**
+   ```bash
+   export PYTHONPATH="$PWD:$PWD/web_app:$PWD/src"
+   cd web_app
+   python start_web.py
+   ```
+
+4. **访问应用**
+   - 打开浏览器访问: http://localhost:8080
+   - 聊天室: http://localhost:8080/rooms
+   - 管理面板: http://localhost:8080/admin
+
+### 📋 详细安装步骤
+
+#### 1. 环境准备
 
 确保已安装Python 3.8+：
 ```bash
 python3 --version
 ```
 
-### 2. 虚拟环境设置
+#### 2. 虚拟环境设置
 
-创建并激活虚拟环境：
+项目已包含虚拟环境，直接激活：
 ```bash
 # 在项目根目录下
-python3 -m venv .venv
+source venv/bin/activate  # Linux/Mac
+# 或者使用
+source .venv/bin/activate  # 备用虚拟环境
 
-# 激活虚拟环境
-source .venv/bin/activate  # Linux/Mac
-# 或
-.venv\Scripts\activate     # Windows
+# Windows用户
+# venv\Scripts\activate
 ```
 
-### 3. 安装依赖
+#### 3. 安装依赖（如果需要）
 
 ```bash
 # 进入web_app目录
 cd web_app
 
-# 安装Python依赖
+# 安装Python依赖（通常已安装）
 pip install -r requirements.txt
 ```
 
-### 4. 配置环境变量
+#### 4. 环境配置
 
-复制环境变量示例文件：
-```bash
-cp env.example .env
-```
-
-编辑 `.env` 文件，设置必要的配置：
+项目已包含 `.env` 配置文件，包含以下关键配置：
 ```env
-SECRET_KEY=your-secret-key-here
-OPENAI_API_KEY=your-openai-api-key-here
-OPENAI_API_BASE=https://api2.aigcbest.top/v1
+# Flask配置
+SECRET_KEY=your-secret-key-here-change-this-in-production
+FLASK_ENV=development
+FLASK_DEBUG=True
+
+# OpenAI配置
+OPENAI_API_KEY=sk-XGGe5y0ZvLcQVFp6XnRizs7q47gsVnAbZx0Xr2mfcVlbr99f
+OPENAI_BASE_URL=https://api2.aigcbest.top/v1
+
+# LLM功能配置
+LLM_TOXICITY_ENABLED=true
+LLM_INTERVENTION_ENABLED=true
+LLM_CONFIDENCE=0.3
+GLOBAL_COOLDOWN=30
+
+# 群体沉默检测配置
+AGENDA_TRANSITION_THRESHOLD=60  # 群体沉默触发时间（秒）
+AGENDA_TRANSITION_COOLDOWN=120  # 群体沉默干预冷却时间（秒）
+SILENCE_THRESHOLD=90            # 个人沉默检测时间（秒）
 ```
 
-### 5. 启动应用
+#### 5. 启动应用
 
-#### 方法一：使用快速启动脚本（推荐）
+**方法一：标准启动（推荐）**
 ```bash
-# 在项目根目录下
-./start_easy.sh
-```
-
-#### 方法二：使用启动脚本
-```bash
-# 在web_app目录下
+# 在项目根目录
+cd /Users/apple/Desktop/first_phase_chatroom_v1
+source venv/bin/activate
+export PYTHONPATH="$PWD:$PWD/web_app:$PWD/src"
+cd web_app
 python start_web.py
 ```
 
-#### 方法三：直接启动
+**方法二：使用启动脚本**
+```bash
+# 修正启动脚本路径后使用
+./start_easy.sh
+```
+
+**方法三：直接运行Flask应用**
 ```bash
 # 在web_app目录下
 python app.py
 ```
 
-### 6. 访问应用
+#### 6. 停止应用
 
-启动成功后，打开浏览器访问：
-- **主应用**: http://localhost:8080
-- **聊天室**: http://localhost:8080/rooms
+**方法一：键盘快捷键**
+- 在运行应用的终端中按 `Ctrl + C`
+
+**方法二：查找并终止进程**
+```bash
+# 查找进程
+lsof -i :8080
+
+# 终止进程
+pkill -f start_web.py
+# 或者
+lsof -ti:8080 | xargs kill -9
+```
+
+#### 7. 验证启动
+
+启动成功后，你应该看到类似输出：
+```
+🟢 [CHATBOT] 系统启动 - Chatbot功能已启用
+🚀 实时监控系统已启动
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://[::1]:8080
+```
+
+#### 8. 访问应用
+
+- **主页**: http://localhost:8080
+- **房间列表**: http://localhost:8080/rooms  
+- **聊天室**: http://localhost:8080/chat/1 （房间ID）
 - **管理面板**: http://localhost:8080/admin
+- **用户资料**: http://localhost:8080/profile
+- **数据统计**: http://localhost:8080/dashboard
 
-### 7. 初始化数据
+#### 9. 默认用户账号
 
-首次启动时，系统会自动：
-- 创建数据库表
-- 添加默认用户和房间
-- 启动实时监控系统
+系统包含以下预设账号：
+
+**管理员账号:**
+- 用户名: `admin2` 密码: `admin123`
+- 用户名: `admin3` 密码: `admin123`
+
+**普通用户账号:**
+- 用户名: `user1` 密码: `user123` (张三)
+- 用户名: `user2` 密码: `user123` (李四)  
+- 用户名: `user3` 密码: `user123` (王五)
 
 ## 使用说明
 
@@ -154,30 +266,186 @@ python app.py
 ### 分析接口
 - `GET /api/analysis/<id>` - 获取对话分析
 
-## 数据库结构
+## 数据库配置
 
-### User表
-- `id`: 用户ID
-- `username`: 用户名
-- `email`: 邮箱
-- `password_hash`: 密码哈希
-- `created_at`: 创建时间
+### 🗃️ 数据库类型
+**SQLite** - 轻量级文件型数据库，适合开发和小型应用
 
-### Conversation表
-- `id`: 对话ID
-- `user_id`: 用户ID
-- `title`: 对话标题
-- `created_at`: 创建时间
+### 📍 数据库文件位置
 
-### Message表
-- `id`: 消息ID
-- `conversation_id`: 对话ID
-- `content`: 消息内容
-- `author`: 作者
-- `gender`: 性别
-- `timestamp`: 时间戳
-- `intervention`: 干预内容
-- `strategy`: 策略类型
+**主数据库文件：**
+```
+/Users/apple/Desktop/first_phase_chatroom_v1/web_app/chatroom_with_intervention.db
+```
+
+**备用数据库文件：**
+```
+/Users/apple/Desktop/first_phase_chatroom_v1/web_app/instance/chatbot.db
+/Users/apple/Desktop/first_phase_chatroom_v1/web_app/instance/chatroom.db
+```
+
+### ⚙️ 数据库配置信息
+
+**应用配置 (app.py):**
+```python
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///chatbot.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+```
+
+**环境变量配置 (env.example):**
+```env
+DATABASE_URL=sqlite:///chatbot.db
+```
+
+**ORM框架：** Flask-SQLAlchemy
+
+### 🔧 数据库管理脚本
+
+| 脚本文件 | 功能描述 |
+|---------|---------|
+| `create_db.py` | 创建数据库表结构 |
+| `add_admin_users.py` | 添加管理员用户账户 |
+| `add_regular_users.py` | 添加普通用户账户 |
+| `migrate_room_chatbot.py` | 数据库迁移和升级 |
+| `check_users.py` | 检查和查看用户账户 |
+
+### 🛠️ 数据库操作命令
+
+**创建数据库：**
+```bash
+cd web_app
+python create_db.py
+```
+
+**添加用户：**
+```bash
+# 添加管理员
+python add_admin_users.py
+
+# 添加普通用户
+python add_regular_users.py
+```
+
+**查看用户：**
+```bash
+python check_users.py
+```
+
+**重置数据库：**
+```bash
+# 删除数据库文件
+rm chatroom_with_intervention.db
+rm instance/chatbot.db
+
+# 重新创建
+python create_db.py
+python add_admin_users.py
+python add_regular_users.py
+```
+
+### 💾 数据库备份与恢复
+
+**备份数据库：**
+```bash
+# 备份主数据库
+cp chatroom_with_intervention.db chatroom_with_intervention_backup_$(date +%Y%m%d_%H%M%S).db
+
+# 备份到其他位置
+cp chatroom_with_intervention.db ~/Desktop/chatroom_backup.db
+```
+
+**恢复数据库：**
+```bash
+# 从备份恢复
+cp chatroom_backup.db chatroom_with_intervention.db
+```
+
+## 数据库表结构
+
+### 📋 主要数据表
+
+#### User表 - 用户信息
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | Integer | 用户ID (主键) |
+| `username` | String(80) | 用户名 (唯一) |
+| `email` | String(120) | 邮箱 (唯一) |
+| `password_hash` | String(128) | 密码哈希 |
+| `role` | String(20) | 角色 ('admin'/'member') |
+| `is_active` | Boolean | 是否活跃 |
+| `gender` | String(10) | 性别 ('male'/'female'/'unknown') |
+| `avatar` | String(200) | 头像路径 |
+| `display_name` | String(100) | 显示名称 |
+| `bio` | Text | 个人简介 |
+| `status` | String(20) | 状态 ('online'/'offline'/'busy') |
+| `created_at` | DateTime | 创建时间 |
+| `last_seen` | DateTime | 最后登录时间 |
+
+#### Room表 - 聊天房间
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | Integer | 房间ID (主键) |
+| `name` | String(100) | 房间名称 |
+| `description` | Text | 房间描述 |
+| `created_by` | Integer | 创建者ID (外键) |
+| `is_private` | Boolean | 是否私密 |
+| `max_members` | Integer | 最大成员数 |
+| `chatbot_enabled` | Boolean | 是否启用聊天机器人 |
+| `created_at` | DateTime | 创建时间 |
+
+#### Message表 - 聊天消息
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | Integer | 消息ID (主键) |
+| `content` | Text | 消息内容 |
+| `author` | String(100) | 作者名称 |
+| `gender` | String(10) | 作者性别 |
+| `room_id` | Integer | 房间ID (外键) |
+| `user_id` | Integer | 用户ID (外键) |
+| `timestamp` | DateTime | 发送时间 |
+| `has_interruption` | Boolean | 是否有干预 |
+| `interruption_type` | String(50) | 干预类型 |
+| `intervention_applied` | Boolean | 是否应用干预 |
+
+#### RoomMembership表 - 房间成员关系
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | Integer | 关系ID (主键) |
+| `user_id` | Integer | 用户ID (外键) |
+| `room_id` | Integer | 房间ID (外键) |
+| `role` | String(20) | 房间角色 ('admin'/'member') |
+| `joined_at` | DateTime | 加入时间 |
+| `is_online` | Boolean | 是否在线 |
+| `can_send_messages` | Boolean | 是否可发消息 |
+| `can_edit_messages` | Boolean | 是否可编辑消息 |
+
+#### Intervention表 - 干预记录
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | Integer | 干预ID (主键) |
+| `room_id` | Integer | 房间ID (外键) |
+| `trigger_type` | String(50) | 触发类型 |
+| `confidence` | Float | 置信度 |
+| `message` | Text | 干预消息 |
+| `reason` | Text | 干预原因 |
+| `timestamp` | DateTime | 干预时间 |
+| `success` | Boolean | 是否成功 |
+
+#### InterventionStyle表 - 干预风格
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | Integer | 风格ID (主键) |
+| `style` | String(50) | 风格类型 |
+| `description` | Text | 风格描述 |
+| `is_active` | Boolean | 是否激活 |
+
+### 🔗 表关系说明
+
+- **User** ↔ **RoomMembership**: 一对多关系，一个用户可以加入多个房间
+- **Room** ↔ **RoomMembership**: 一对多关系，一个房间可以有多个成员  
+- **User** ↔ **Message**: 一对多关系，一个用户可以发送多条消息
+- **Room** ↔ **Message**: 一对多关系，一个房间包含多条消息
+- **Room** ↔ **Intervention**: 一对多关系，一个房间可以有多次干预记录
 
 ## 开发说明
 

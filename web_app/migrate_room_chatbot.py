@@ -9,6 +9,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from app import app, db, Room
 import sqlite3
+from sqlalchemy import text
 
 def migrate_database():
     """添加chatbot_enabled字段到Room表"""
@@ -24,8 +25,10 @@ def migrate_database():
             
             print("🔄 开始数据库迁移：添加chatbot_enabled字段...")
             
-            # 使用SQLite的ALTER TABLE添加字段
-            db.engine.execute('ALTER TABLE room ADD COLUMN chatbot_enabled BOOLEAN DEFAULT 0')
+            # 使用SQLite的ALTER TABLE添加字段 - SQLAlchemy 2.0语法
+            with db.engine.connect() as conn:
+                conn.execute(text('ALTER TABLE room ADD COLUMN chatbot_enabled BOOLEAN DEFAULT 0'))
+                conn.commit()
             
             print("✅ 数据库迁移完成！chatbot_enabled字段已添加")
             

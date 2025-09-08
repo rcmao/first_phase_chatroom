@@ -1481,7 +1481,7 @@
                     const hint = document.getElementById('botSwitchHint');
                     if (sw && hint) {
                         sw.checked = !!data.enabled;
-                        hint.textContent = data.enabled ? '当前：已启用' : '当前：已关闭';
+                        hint.textContent = data.enabled ? t('chatbot_enabled') : t('chatbot_disabled');
                         console.log(`🔧 [前端] 房间${data.room_id}开关UI已同步更新:`, data.enabled ? '已启用' : '已关闭');
                     }
                 }
@@ -1608,6 +1608,9 @@
                 return;
             }
             
+            // 检查用户是否在聊天底部（添加一些缓冲区域）
+            const isAtBottom = messagesContainer.scrollTop >= messagesContainer.scrollHeight - messagesContainer.clientHeight - 50;
+            
             // 清除欢迎消息
             if (messagesContainer.children.length === 1 && 
                 messagesContainer.children[0].querySelector('.fa-comments')) {
@@ -1683,7 +1686,11 @@
             messageDiv.appendChild(content);
             
             messagesContainer.appendChild(messageDiv);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            // 只有在用户原本就在底部时才自动滚动
+            if (isAtBottom) {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
             
             // 更新统计
             stats.totalMessages++;
@@ -1703,6 +1710,10 @@
         // 添加管理员专用的详细干预信息
         function addAdminIntervention(data) {
             const messagesContainer = document.getElementById('chatMessages');
+            
+            // 检查用户是否在聊天底部（添加一些缓冲区域）
+            const isAtBottom = messagesContainer.scrollTop >= messagesContainer.scrollHeight - messagesContainer.clientHeight - 50;
+            
             const interventionDiv = document.createElement('div');
             interventionDiv.className = 'message admin-intervention';
             
@@ -1779,7 +1790,11 @@
             interventionDiv.appendChild(content);
             
             messagesContainer.appendChild(interventionDiv);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            // 只有在用户原本就在底部时才自动滚动
+            if (isAtBottom) {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
             
             // 更新统计
             stats.interventions++;
@@ -2458,7 +2473,11 @@
                     export_chat_history: '导出聊天记录',
                     exporting: '导出中...',
                     export_success: '聊天记录导出成功！',
-                    export_failed: '导出失败，请重试'
+                    export_failed: '导出失败，请重试',
+                    chatbot: 'Chatbot',
+                    chatbot_enabled: '当前：已启用',
+                    chatbot_disabled: '当前：已关闭',
+                    chatbot_status_failed: '当前：获取状态失败'
                 },
                 en: {
                     page_title: 'Chat Room',
@@ -2498,7 +2517,11 @@
                     export_chat_history: 'Export Chat History',
                     exporting: 'Exporting...',
                     export_success: 'Chat history exported successfully!',
-                    export_failed: 'Export failed, please try again'
+                    export_failed: 'Export failed, please try again',
+                    chatbot: 'Chatbot',
+                    chatbot_enabled: 'Current: Enabled',
+                    chatbot_disabled: 'Current: Disabled',
+                    chatbot_status_failed: 'Current: Failed to get status'
                 }
             };
             return translations[lang] || translations.zh;
@@ -2730,6 +2753,12 @@
             if (zhBtn) zhBtn.innerHTML = ` ${t('chinese')}`;
             if (enBtn) enBtn.innerHTML = ` ${t('english')}`;
             
+            // 更新Chatbot开关文本
+            const chatbotLabelText = document.querySelector('.admin-switch-control .label-text');
+            if (chatbotLabelText) {
+                chatbotLabelText.textContent = t('chatbot');
+            }
+            
             console.log('界面文本更新完成，当前语言:', currentLanguage);
         }
         
@@ -2763,7 +2792,7 @@
                 console.log(`🔧 [前端] 房间${roomId}服务器返回开关状态:`, j);
                 
                 sw.checked = !!j.enabled;
-                hint.textContent = j.enabled ? '当前：已启用' : '当前：已关闭';
+                hint.textContent = j.enabled ? t('chatbot_enabled') : t('chatbot_disabled');
                 console.log(`🔧 [前端] 房间${roomId}开关UI已更新:`, j.enabled ? '已启用' : '已关闭');
             }catch(e){ 
                 console.error('🔧 [前端] 刷新开关状态失败:', e);
@@ -2772,7 +2801,7 @@
                 const hint = document.getElementById('botSwitchHint');
                 if (sw && hint) {
                     sw.checked = false;
-                    hint.textContent = '当前：获取状态失败';
+                    hint.textContent = t('chatbot_status_failed');
                 }
             }
             }

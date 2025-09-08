@@ -2,6 +2,18 @@
 
 一个基于Flask和WebSocket的智能聊天室系统，集成了先进的AI干预引擎，专门用于足球话题讨论的智能管理和引导。
 
+## ⚡ 快速启动
+
+**最简启动方式:**
+```bash
+cd /Users/apple/Desktop/first_phase_chatroom_v1
+./start_easy.sh
+```
+
+📖 **详细启动说明**: 查看 [QUICK_START.md](./QUICK_START.md) | [Web应用详细文档](./web_app/README.md)
+
+🌐 **访问地址**: http://localhost:8080
+
 ## 🎯 核心功能
 
 ### 智能干预引擎 (SmartInterventionEngine)

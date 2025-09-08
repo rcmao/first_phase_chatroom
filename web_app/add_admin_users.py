@@ -12,6 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import app, db, User
 from werkzeug.security import generate_password_hash
+from sqlalchemy import text
 
 def add_admin_users():
     """添加新的管理员用户"""
@@ -74,10 +75,11 @@ def main():
     print("🔧 添加新的管理员用户")
     print("=" * 40)
     
-    # 检查数据库连接
+    # 检查数据库连接 - SQLAlchemy 2.0语法
     with app.app_context():
         try:
-            db.engine.execute('SELECT 1')
+            with db.engine.connect() as conn:
+                conn.execute(text('SELECT 1'))
             print("✅ 数据库连接正常")
         except Exception as e:
             print(f"❌ 数据库连接失败: {e}")

@@ -29,7 +29,7 @@ class RealtimeMonitor:
         
         # 监控配置
         self.scan_interval = 10  # 每10秒扫描一次
-        self.max_silence_before_action = 30  # 30秒群体沉默触发议程转换
+        self.max_silence_before_action = 45  # 45秒群体沉默触发第一次破冰
         self.active_rooms = set()  # 活跃房间列表
         
         # 统计信息

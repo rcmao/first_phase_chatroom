@@ -1322,24 +1322,24 @@ def _trigger_icebreaker_for_room(room_id):
         recent_messages = list(smart_intervention_engine.room_recent_messages.get(room_id, []))
         non_admin_messages = [msg for msg in recent_messages if not smart_intervention_engine._is_admin_user(str(msg['user_id']))]
         
-        # 实验场景：更积极的破冰策略
+        # 破冰策略：确保给用户足够时间响应
         should_trigger = False
         if not non_admin_messages:
             if recent_messages:
-                # 有admin消息但用户未响应，立即触发破冰
+                # 有admin消息但用户未响应，需要等待45秒后才破冰
                 last_admin_msg_time = recent_messages[-1]['timestamp']
                 admin_silence = current_time - last_admin_msg_time
-                if admin_silence >= 15:  # 15秒后就触发破冰，更积极
+                if admin_silence >= 45:  # 确保45秒后才触发破冰
                     should_trigger = True
                     reason = f"admin消息后用户沉默{int(admin_silence)}秒，触发破冰"
             else:
-                # 完全没有消息，立即触发破冰
-                should_trigger = True
-                reason = "房间无消息历史，触发破冰"
+                # 完全没有消息，也需要等待45秒，让监控系统处理
+                should_trigger = False
+                reason = "房间无消息历史，等待监控系统处理"
         else:
             last_user_msg_time = non_admin_messages[-1]['timestamp']
             silence_duration = current_time - last_user_msg_time
-            if silence_duration >= 30:  # 降低到30秒，更积极触发
+            if silence_duration >= 45:  # 45秒首次破冰触发
                 should_trigger = True
                 reason = f"用户沉默{int(silence_duration)}秒"
         
@@ -1384,18 +1384,21 @@ def _trigger_icebreaker_for_all_rooms():
                 # 如果没有用户消息，或者用户沉默时间较长，触发破冰
                 needs_icebreaker = False
                 if len(non_admin_messages) == 0 and len(recent_messages) > 0:
-                    # 有admin消息但没有用户响应
-                    needs_icebreaker = True
-                    reason = "admin消息后用户未响应"
+                    # 有admin消息但没有用户响应，需要检查时间间隔
+                    last_admin_msg_time = recent_messages[-1]['timestamp']
+                    admin_silence = current_time - last_admin_msg_time
+                    if admin_silence >= 45:  # 确保45秒后才触发破冰
+                        needs_icebreaker = True
+                        reason = f"admin消息后用户沉默{int(admin_silence)}秒"
                 elif len(recent_messages) == 0:
-                    # 完全没有消息
-                    needs_icebreaker = True
-                    reason = "房间无消息历史"
+                    # 完全没有消息，让监控系统处理
+                    needs_icebreaker = False
+                    reason = "房间无消息历史，等待监控系统处理"
                 elif len(non_admin_messages) > 0:
                     # 检查用户沉默时间
                     last_user_msg_time = non_admin_messages[-1]['timestamp']
                     silence_duration = current_time - last_user_msg_time
-                    if silence_duration >= 30:  # 30秒以上就触发破冰，更积极
+                    if silence_duration >= 45:  # 45秒首次破冰触发
                         needs_icebreaker = True
                         reason = f"用户沉默{int(silence_duration)}秒"
                 
